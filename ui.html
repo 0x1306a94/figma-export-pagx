@@ -1,0 +1,77 @@
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 12px;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  #status {
+    color: #666;
+    font-size: 12px;
+    min-height: 16px;
+  }
+
+  pre {
+    background: #f5f5f5;
+    padding: 8px;
+    overflow: auto;
+    max-height: 560px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style>
+
+<h2>Motion IR</h2>
+<p>选择一个 root 节点后自动读取</p>
+<div class="actions">
+  <button id="refresh">刷新</button>
+  <button id="copy">复制 JSON</button>
+  <button id="cancel">关闭</button>
+</div>
+<div id="status"></div>
+<pre id="output">加载中...</pre>
+
+<script>
+  let currentJson = '';
+
+  function setStatus(text) {
+    document.getElementById('status').textContent = text;
+  }
+
+  window.onmessage = (event) => {
+    const message = event.data.pluginMessage;
+    if (message?.type === 'motion-ir') {
+      currentJson = JSON.stringify(message.data, null, 2);
+      document.getElementById('output').textContent = currentJson;
+      setStatus('');
+    }
+  };
+
+  document.getElementById('refresh').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'read-motion' } }, '*');
+  };
+
+  document.getElementById('copy').onclick = async () => {
+    if (!currentJson) {
+      setStatus('暂无可复制内容');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(currentJson);
+      setStatus('已复制到剪贴板');
+    } catch {
+      setStatus('复制失败，请手动选择文本复制');
+    }
+  };
+
+  document.getElementById('cancel').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+  };
+</script>

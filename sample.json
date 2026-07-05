@@ -1,0 +1,370 @@
+{
+    "nodes": [
+      {
+        "id": "190:3",
+        "name": "Rectangle 17",
+        "type": "RECTANGLE",
+        "timelines": [
+          {
+            "id": "190:2",
+            "duration": 2
+          }
+        ],
+        "animationStyles": [
+          {
+            "id": "AnimationPresetId:189:32",
+            "styleId": "CodeComponentId:189:31",
+            "name": "motion.preset_name.position",
+            "duration": 0.5,
+            "timelineOffset": 0,
+            "props": {
+              "type": "slide_out",
+              "easing": {
+                "type": "EASE_OUT",
+                "easingFunctionCubicBezier": {
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 0.58,
+                  "y2": 1
+                }
+              },
+              "direction": "left",
+              "distance": 200,
+              "startX": 200,
+              "axis": "xy",
+              "startY": 200,
+              "endX": 0,
+              "endY": 0,
+              "delay": 0
+            }
+          }
+        ],
+        "animations": {
+          "TRANSLATION_X": {
+            "tracks": [
+              {
+                "id": "KeyframeTrackId:189:33",
+                "animationPreset": {
+                  "id": "AnimationPresetId:189:32",
+                  "presetComponentId": "CodeComponentId:189:31",
+                  "name": "motion.preset_name.position",
+                  "duration": 0.5,
+                  "timelineOffset": 0,
+                  "props": {
+                    "type": "slide_out",
+                    "easing": {
+                      "easingType": 1
+                    },
+                    "direction": "left",
+                    "distance": 200,
+                    "startX": 200,
+                    "axis": "xy",
+                    "startY": 200,
+                    "endX": 0,
+                    "endY": 0,
+                    "delay": 0
+                  }
+                },
+                "keyframes": [
+                  {
+                    "id": "189:34",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0
+                  },
+                  {
+                    "id": "189:35",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": -200
+                    },
+                    "timelinePosition": 0.5
+                  }
+                ],
+                "keyframeOperation": "OFFSET"
+              }
+            ],
+            "timelineDuration": 2,
+            "baseValue": {
+              "type": "FLOAT",
+              "value": 694
+            }
+          },
+          "TRANSLATION_Y": {
+            "tracks": [
+              {
+                "id": "KeyframeTrackId:189:36",
+                "animationPreset": {
+                  "id": "AnimationPresetId:189:32",
+                  "presetComponentId": "CodeComponentId:189:31",
+                  "name": "motion.preset_name.position",
+                  "duration": 0.5,
+                  "timelineOffset": 0,
+                  "props": {
+                    "type": "slide_out",
+                    "easing": {
+                      "easingType": 1
+                    },
+                    "direction": "left",
+                    "distance": 200,
+                    "startX": 200,
+                    "axis": "xy",
+                    "startY": 200,
+                    "endX": 0,
+                    "endY": 0,
+                    "delay": 0
+                  }
+                },
+                "keyframes": [
+                  {
+                    "id": "189:37",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0
+                  },
+                  {
+                    "id": "189:38",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0.5
+                  }
+                ],
+                "keyframeOperation": "OFFSET"
+              }
+            ],
+            "timelineDuration": 2,
+            "baseValue": {
+              "type": "FLOAT",
+              "value": 1120
+            }
+          }
+        },
+        "manualKeyframeTracks": {}
+      },
+      {
+        "id": "190:5",
+        "name": "Ellipse 2",
+        "type": "ELLIPSE",
+        "timelines": [
+          {
+            "id": "190:2",
+            "duration": 2
+          }
+        ],
+        "animationStyles": [
+          {
+            "id": "AnimationPresetId:190:6",
+            "styleId": "CodeComponentId:189:31",
+            "name": "motion.preset_name.position",
+            "duration": 0.5,
+            "timelineOffset": 0.5,
+            "props": {
+              "type": "slide_in",
+              "easing": {
+                "type": "EASE_OUT",
+                "easingFunctionCubicBezier": {
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 0.58,
+                  "y2": 1
+                }
+              },
+              "direction": "left",
+              "distance": 200,
+              "startX": 200,
+              "axis": "xy",
+              "startY": 200,
+              "endX": 0,
+              "endY": 0,
+              "delay": 0.5
+            }
+          }
+        ],
+        "animations": {
+          "TRANSLATION_X": {
+            "tracks": [
+              {
+                "id": "KeyframeTrackId:190:7",
+                "animationPreset": {
+                  "id": "AnimationPresetId:190:6",
+                  "presetComponentId": "CodeComponentId:189:31",
+                  "name": "motion.preset_name.position",
+                  "duration": 0.5,
+                  "timelineOffset": 0.5,
+                  "props": {
+                    "type": "slide_in",
+                    "easing": {
+                      "easingType": 1
+                    },
+                    "direction": "left",
+                    "distance": 200,
+                    "startX": 200,
+                    "axis": "xy",
+                    "startY": 200,
+                    "endX": 0,
+                    "endY": 0,
+                    "delay": 0.5
+                  }
+                },
+                "keyframes": [
+                  {
+                    "id": "190:8",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": -200
+                    },
+                    "timelinePosition": 0
+                  },
+                  {
+                    "id": "190:9",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0.5
+                  }
+                ],
+                "keyframeOperation": "OFFSET"
+              }
+            ],
+            "timelineDuration": 2,
+            "baseValue": {
+              "type": "FLOAT",
+              "value": 644
+            }
+          },
+          "TRANSLATION_Y": {
+            "tracks": [
+              {
+                "id": "KeyframeTrackId:190:10",
+                "animationPreset": {
+                  "id": "AnimationPresetId:190:6",
+                  "presetComponentId": "CodeComponentId:189:31",
+                  "name": "motion.preset_name.position",
+                  "duration": 0.5,
+                  "timelineOffset": 0.5,
+                  "props": {
+                    "type": "slide_in",
+                    "easing": {
+                      "easingType": 1
+                    },
+                    "direction": "left",
+                    "distance": 200,
+                    "startX": 200,
+                    "axis": "xy",
+                    "startY": 200,
+                    "endX": 0,
+                    "endY": 0,
+                    "delay": 0.5
+                  }
+                },
+                "keyframes": [
+                  {
+                    "id": "190:11",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0
+                  },
+                  {
+                    "id": "190:12",
+                    "easing": {
+                      "type": "CUSTOM_CUBIC_BEZIER",
+                      "easingFunctionCubicBezier": {
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 0.58,
+                        "y2": 1
+                      }
+                    },
+                    "value": {
+                      "type": "FLOAT",
+                      "value": 0
+                    },
+                    "timelinePosition": 0.5
+                  }
+                ],
+                "keyframeOperation": "OFFSET"
+              }
+            ],
+            "timelineDuration": 2,
+            "baseValue": {
+              "type": "FLOAT",
+              "value": 662
+            }
+          }
+        },
+        "manualKeyframeTracks": {}
+      }
+    ]
+  }
