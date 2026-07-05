@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pagx width="400" height="300" data-exported-by="figma-export-pagx" data-figma-root-id="1:2">
+  <Layer id="layer_1_2" name="Root Frame" left="0" top="0" width="400" height="300" data-figma-id="1:2">
+    <Layer id="layer_1_3" name="Background" left="0" top="0" width="400" height="300" data-figma-id="1:3">
+      <Rectangle left="0" top="0" width="400" height="300" roundness="16"/>
+      <Fill color="#1E293B"/>
+    </Layer>
+    <Layer id="layer_1_4" name="Circle" left="150" top="90" width="100" height="100" alpha="0.9" data-figma-id="1:4">
+      <Ellipse left="0" top="0" width="100" height="100"/>
+      <Fill color="#FF4466"/>
+      <Stroke width="2" color="#FFFFFF"/>
+    </Layer>
+  </Layer>
+</pagx>

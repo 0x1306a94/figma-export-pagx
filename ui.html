@@ -1,17 +1,145 @@
-<h2>Rectangle Creator</h2>
-<p>Count: <input id="count" type="number" value="5"></p>
-<button id="create">Create</button>
-<button id="cancel">Cancel</button>
-<script>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font: 12px/1.4 Inter, sans-serif;
+      margin: 0;
+      padding: 16px;
+      color: #111;
+    }
+    h2 { margin: 0 0 8px; font-size: 14px; }
+    p { margin: 0 0 12px; color: #666; }
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #export {
+      background: #18a0fb;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    #export:disabled { opacity: 0.6; cursor: default; }
+    #cancel {
+      background: #f0f0f0;
+      color: #333;
+    }
+    #meta {
+      margin: 12px 0;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 6px;
+      display: none;
+    }
+    #diagnostics {
+      margin-top: 12px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .diag {
+      padding: 6px 8px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+    .diag.warning { background: #fff7e6; color: #8a6100; }
+    .diag.error { background: #ffecec; color: #a12828; }
+    .diag.info { background: #eef6ff; color: #245ea8; }
+    #error {
+      display: none;
+      margin-top: 12px;
+      padding: 8px;
+      background: #ffecec;
+      color: #a12828;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h2>导出 PAGX</h2>
+  <p>选择一个 Frame 或图层作为 root，然后导出为 .pagx 文件。</p>
+  <button id="export">导出 PAGX</button>
+  <button id="cancel">关闭</button>
+  <div id="meta"></div>
+  <div id="error"></div>
+  <div id="diagnostics"></div>
+  <script>
+    const exportButton = document.getElementById('export');
+    const cancelButton = document.getElementById('cancel');
+    const metaEl = document.getElementById('meta');
+    const errorEl = document.getElementById('error');
+    const diagnosticsEl = document.getElementById('diagnostics');
 
-document.getElementById('create').onclick = () => {
-  const textbox = document.getElementById('count');
-  const count = parseInt(textbox.value, 10);
-  parent.postMessage({ pluginMessage: { type: 'create-shapes', count } }, '*')
-}
+    function showError(message) {
+      errorEl.style.display = 'block';
+      errorEl.textContent = message;
+    }
 
-document.getElementById('cancel').onclick = () => {
-  parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
-}
+    function clearError() {
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+    }
 
-</script>
+    function renderDiagnostics(items) {
+      diagnosticsEl.innerHTML = '';
+      if (!items || items.length === 0) {
+        return;
+      }
+      for (const item of items) {
+        const div = document.createElement('div');
+        div.className = `diag ${item.level}`;
+        div.textContent = `[${item.code}] ${item.message}`;
+        diagnosticsEl.appendChild(div);
+      }
+    }
+
+    function downloadPagx(xml, fileName) {
+      const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    exportButton.onclick = () => {
+      clearError();
+      exportButton.disabled = true;
+      exportButton.textContent = '导出中...';
+      parent.postMessage({ pluginMessage: { type: 'export-pagx' } }, '*');
+    };
+
+    cancelButton.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+    };
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      exportButton.disabled = false;
+      exportButton.textContent = '导出 PAGX';
+
+      if (msg.type === 'export-error') {
+        showError(msg.error);
+        return;
+      }
+
+      if (msg.type === 'export-result') {
+        clearError();
+        metaEl.style.display = 'block';
+        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个`;
+        renderDiagnostics(msg.diagnostics);
+        downloadPagx(msg.xml, msg.fileName);
+      }
+    };
+  </script>
+</body>
+</html>

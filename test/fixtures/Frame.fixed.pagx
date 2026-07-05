@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pagx width="800" height="800" data-exported-by="figma-export-pagx" data-figma-root-id="143:14">
+  <Layer name="Frame" id="layer_143_14" width="800" height="800" clipToBounds="true" data-figma-id="143:14">
+    <Layer name="bg" id="layer_143_15" width="800" height="800" data-figma-id="143:15">
+      <Rectangle width="800" height="800"/>
+      <Fill color="#ffeeff"/>
+    </Layer>
+    <Layer name="svg_1" id="layer_143_16" left="63" top="83" width="259" height="203" data-figma-id="143:16">
+      <Rectangle width="259" height="203" roundness="20"/>
+      <Fill color="#5fbf00"/>
+      <Stroke width="1" color="#000000"/>
+    </Layer>
+    <Layer name="svg_2" id="layer_143_17" left="85" top="411" width="143" height="234" data-figma-id="143:17">
+      <Rectangle width="143" height="234"/>
+      <Fill color="#729999"/>
+      <Stroke width="1" color="#000000"/>
+    </Layer>
+    <Layer name="svg_3" id="layer_143_18" left="501" top="120" width="231" height="187" data-figma-id="143:18">
+      <Rectangle width="231" height="187"/>
+      <Fill color="#c9c92c"/>
+      <Stroke width="1" color="#000000"/>
+    </Layer>
+    <Layer name="svg_4" id="layer_143_19" left="475" top="461" width="245" height="202" data-figma-id="143:19">
+      <Path data="M96 38 L245 0 L245 202 L0 202 L96 38 Z"/>
+      <Fill color="#32adad"/>
+      <Stroke width="1" color="#000000"/>
+    </Layer>
+    <Layer name="svg_5" id="layer_143_21" left="290" top="425" width="126" height="216" data-figma-id="143:21">
+      <Ellipse width="126" height="216"/>
+      <Fill color="#d12e71"/>
+      <Stroke width="4" color="#827878"/>
+    </Layer>
+    <Layer name="svg_6" id="layer_143_22" left="50" top="50" width="100" height="100" data-figma-id="143:22">
+      <Ellipse width="100" height="100"/>
+      <Fill color="#0000ff"/>
+      <Stroke width="2" color="#000000"/>
+    </Layer>
+  </Layer>
+</pagx>
