@@ -18,6 +18,44 @@ type MotionCapableNode = SceneNode & {
 };
 
 type RotationDirection = 'clockwise' | 'counterclockwise';
+type RotationPresetType = 'rotateIn' | 'rotateOut' | 'custom';
+
+function isRotationStyle(style: AppliedAnimationStyle): boolean {
+  const name = style.name ?? '';
+  const type = typeof style.props?.type === 'string' ? style.props.type : '';
+  return name.includes('rotation')
+    || type === 'rotateIn'
+    || type === 'rotateOut'
+    || type === 'custom';
+}
+
+function readNumberProp(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  return typeof value === 'number' ? value : null;
+}
+
+function readRotationDirectionFromProps(record: Record<string, unknown> | undefined): RotationDirection | null {
+  if (!record) {
+    return null;
+  }
+
+  const type = typeof record.type === 'string' ? record.type : '';
+  if (type === 'custom') {
+    const start = readNumberProp(record, 'start');
+    const end = readNumberProp(record, 'end');
+    if (start !== null && end !== null) {
+      if (end > start) {
+        return 'clockwise';
+      }
+      if (end < start) {
+        return 'counterclockwise';
+      }
+    }
+    return null;
+  }
+
+  return normalizeRotationDirection(record.direction);
+}
 
 function normalizeRotationDirection(value: unknown): RotationDirection | null {
   if (typeof value !== 'string') {
@@ -35,17 +73,12 @@ function normalizeRotationDirection(value: unknown): RotationDirection | null {
   return null;
 }
 
-function readDirectionFromRecord(record: Record<string, unknown> | undefined): RotationDirection | null {
-  if (!record) {
-    return null;
-  }
-
-  return normalizeRotationDirection(record.direction);
-}
-
 function resolveRotationDirection(node: MotionCapableNode): RotationDirection | null {
   for (const style of node.animationStyles ?? []) {
-    const direction = readDirectionFromRecord(style.props as Record<string, unknown> | undefined);
+    if (!isRotationStyle(style)) {
+      continue;
+    }
+    const direction = readRotationDirectionFromProps(style.props as Record<string, unknown> | undefined);
     if (direction) {
       return direction;
     }
@@ -60,6 +93,45 @@ function resolveRotationDirection(node: MotionCapableNode): RotationDirection | 
   }
 
   return null;
+}
+
+function resolveRotationPresetType(node: MotionCapableNode): RotationPresetType | null {
+  for (const style of node.animationStyles ?? []) {
+    if (!isRotationStyle(style)) {
+      continue;
+    }
+    const type = typeof style.props?.type === 'string' ? style.props.type : '';
+    if (type === 'rotateIn' || type === 'rotateOut' || type === 'custom') {
+      return type;
+    }
+  }
+
+  return null;
+}
+
+function hasSetRotationAnimation(node: MotionCapableNode): boolean {
+  const binding = node.animations.ROTATION;
+  return !!binding && bindingUsesSetOperation(binding);
+}
+
+function readSetRotationOrigin(binding: KeyframeBinding): number {
+  let minTime = Number.POSITIVE_INFINITY;
+  let origin = 0;
+  for (const track of binding.tracks) {
+    if (track.keyframeOperation !== 'SET') {
+      continue;
+    }
+    for (const keyframe of track.keyframes) {
+      if (keyframe.value.type !== 'FLOAT') {
+        continue;
+      }
+      if (keyframe.timelinePosition <= minTime) {
+        minTime = keyframe.timelinePosition;
+        origin = keyframe.value.value;
+      }
+    }
+  }
+  return origin;
 }
 
 function applyRotationDirection(
@@ -190,7 +262,119 @@ function figmaRawTranslationToPagx(value: number): number {
   return -value || 0;
 }
 
-function readPagxTranslationSpan(node: MotionCapableNode): { x: number; y: number } | null {
+function shouldNegateRotationDegrees(
+  presetType: RotationPresetType | null,
+  direction: RotationDirection | null,
+  usesSetRotation: boolean,
+): boolean {
+  if (usesSetRotation) {
+    return true;
+  }
+  if (presetType === 'rotateIn') {
+    return true;
+  }
+  if (presetType === 'rotateOut' || presetType === 'custom') {
+    return direction === 'counterclockwise';
+  }
+  return direction === 'counterclockwise';
+}
+
+function figmaRotationDegreesToPagx(
+  degrees: number,
+  presetType: RotationPresetType | null,
+  direction: RotationDirection | null,
+  usesSetRotation: boolean,
+): number {
+  if (shouldNegateRotationDegrees(presetType, direction, usesSetRotation)) {
+    return -degrees || 0;
+  }
+  return degrees;
+}
+
+function readConstraintAxis(node: SceneNode, axis: 'x' | 'y'): Constraints['horizontal'] | null {
+  if (!('constraints' in node)) {
+    return null;
+  }
+  return axis === 'x' ? node.constraints.horizontal : node.constraints.vertical;
+}
+
+function shouldNegateOffsetForAxis(
+  node: SceneNode,
+  parent: SceneNode | null,
+  axis: 'x' | 'y',
+): boolean {
+  if (axis === 'y') {
+    return false;
+  }
+
+  if (
+    parent
+    && 'x' in node
+    && 'y' in node
+    && 'width' in node
+    && 'height' in node
+    && 'width' in parent
+    && 'height' in parent
+  ) {
+    const distanceToLeft = node.x;
+    const distanceToRight = parent.width - (node.x + node.width);
+    return distanceToRight < distanceToLeft;
+  }
+
+  const constraint = readConstraintAxis(node, axis);
+  return constraint === 'MAX';
+}
+
+function resolveFloatKeyframeValue(
+  rawValue: number,
+  operation: 'SET' | 'OFFSET' | 'SCALE',
+  translationContext?: TranslationSampleContext,
+): number {
+  if (!translationContext) {
+    return rawValue;
+  }
+  if (operation === 'OFFSET') {
+    return figmaOffsetValueToPagx(
+      rawValue,
+      translationContext.axis,
+      translationContext.node,
+      translationContext.parent,
+    );
+  }
+  if (operation === 'SET') {
+    return figmaRawTranslationToPagx(rawValue);
+  }
+  return rawValue;
+}
+
+function figmaOffsetValueToPagx(
+  value: number,
+  axis: 'x' | 'y',
+  node: SceneNode,
+  parent: SceneNode | null,
+): number {
+  return shouldNegateOffsetForAxis(node, parent, axis)
+    ? (-value || 0)
+    : (value || 0);
+}
+
+function translationKeyframeValueToPagx(
+  value: number,
+  axis: 'x' | 'y',
+  operation: 'SET' | 'OFFSET',
+  node: SceneNode,
+  parent: SceneNode | null,
+): number {
+  if (operation === 'OFFSET') {
+    return figmaOffsetValueToPagx(value, axis, node, parent);
+  }
+  return figmaRawTranslationToPagx(value);
+}
+
+function readPagxTranslationSpan(
+  node: MotionCapableNode,
+  parent: SceneNode | null,
+): { x: number; y: number } | null {
   let minTime = Number.POSITIVE_INFINITY;
   let maxTime = Number.NEGATIVE_INFINITY;
   let startX = 0;
@@ -201,12 +385,21 @@ function readPagxTranslationSpan(node: MotionCapableNode): { x: number; y: numbe
 
   const readFloatKeyframes = (binding: KeyframeBinding, axis: 'x' | 'y'): void => {
     for (const track of binding.tracks) {
+      if (track.keyframeOperation !== 'SET' && track.keyframeOperation !== 'OFFSET') {
+        continue;
+      }
       for (const keyframe of track.keyframes) {
         if (keyframe.value.type !== 'FLOAT') {
           continue;
         }
         hasSample = true;
-        const pagxValue = figmaRawTranslationToPagx(keyframe.value.value);
+        const pagxValue = translationKeyframeValueToPagx(
+          keyframe.value.value,
+          axis,
+          track.keyframeOperation,
+          node,
+          parent,
+        );
         if (keyframe.timelinePosition <= minTime) {
           minTime = keyframe.timelinePosition;
           if (axis === 'x') {
@@ -229,13 +422,28 @@ function readPagxTranslationSpan(node: MotionCapableNode): { x: number; y: numbe
 
   const readVectorKeyframes = (binding: KeyframeBinding): void => {
     for (const track of binding.tracks) {
+      if (track.keyframeOperation !== 'SET' && track.keyframeOperation !== 'OFFSET') {
+        continue;
+      }
       for (const keyframe of track.keyframes) {
         if (keyframe.value.type !== 'VECTOR') {
           continue;
         }
         hasSample = true;
-        const pagxX = figmaRawTranslationToPagx(keyframe.value.value.x);
-        const pagxY = figmaRawTranslationToPagx(keyframe.value.value.y);
+        const pagxX = translationKeyframeValueToPagx(
+          keyframe.value.value.x,
+          'x',
+          track.keyframeOperation,
+          node,
+          parent,
+        );
+        const pagxY = translationKeyframeValueToPagx(
+          keyframe.value.value.y,
+          'y',
+          track.keyframeOperation,
+          node,
+          parent,
+        );
         if (keyframe.timelinePosition <= minTime) {
           minTime = keyframe.timelinePosition;
           startX = pagxX;
@@ -274,8 +482,11 @@ function readPagxTranslationSpan(node: MotionCapableNode): { x: number; y: numbe
   };
 }
 
-function readFigmaTranslationSpan(node: MotionCapableNode): { x: number; y: number } | null {
-  return readPagxTranslationSpan(node);
+function readFigmaTranslationSpan(
+  node: MotionCapableNode,
+  parent: SceneNode | null,
+): { x: number; y: number } | null {
+  return readPagxTranslationSpan(node, parent);
 }
 
 export function motionLayoutPositionForExport(
@@ -286,7 +497,7 @@ export function motionLayoutPositionForExport(
     return layoutPositionAttrs(node, parent);
   }
 
-  const span = readPagxTranslationSpan(node);
+  const span = readPagxTranslationSpan(node, parent);
   if (!span) {
     return layoutPositionAttrs(node, parent);
   }
@@ -427,7 +638,7 @@ function serializeAnimationsObject(animations: Animations): Record<string, unkno
 export function collectMotionDebugData(root: SceneNode): unknown[] {
   const entries: unknown[] = [];
 
-  function walk(node: SceneNode): void {
+  function walk(node: SceneNode, parent: SceneNode | null): void {
     if (isMotionNode(node)) {
       const animationKeys = Object.keys(node.animations).filter(
         (field) => node.animations[field as keyof Animations],
@@ -436,6 +647,15 @@ export function collectMotionDebugData(root: SceneNode): unknown[] {
         id: node.id,
         name: node.name,
         type: node.type,
+        layout: {
+          x: 'x' in node ? node.x : undefined,
+          y: 'y' in node ? node.y : undefined,
+          width: 'width' in node ? node.width : undefined,
+          height: 'height' in node ? node.height : undefined,
+          constraints: 'constraints' in node ? node.constraints : undefined,
+          parentWidth: parent && 'width' in parent ? parent.width : undefined,
+          parentHeight: parent && 'height' in parent ? parent.height : undefined,
+        },
         hasMotionData: hasMotionData(node),
         animationKeys,
         animationStyles: (node.animationStyles ?? []).map((style) => ({
@@ -454,12 +674,12 @@ export function collectMotionDebugData(root: SceneNode): unknown[] {
     }
     if ('children' in node) {
       for (const child of node.children) {
-        walk(child);
+        walk(child, node);
       }
     }
   }
 
-  walk(root);
+  walk(root, null);
   return entries;
 }
 
@@ -575,10 +795,19 @@ function sortAndDedupeVectorSamples(samples: VectorSample[]): VectorSample[] {
   return deduped;
 }
 
-function collectFloatSamples(binding: KeyframeBinding): FloatSample[] {
+type TranslationSampleContext = {
+  axis: 'x' | 'y';
+  node: SceneNode;
+  parent: SceneNode | null;
+};
+
+function collectFloatSamples(
+  binding: KeyframeBinding,
+  translationContext?: TranslationSampleContext,
+): FloatSample[] {
   const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
   const samples: FloatSample[] = [];
-  let usesSetTrack = false;
+  let usesSetKeyframeTrack = false;
 
   for (const track of binding.tracks) {
     if (track.keyframeOperation === 'OFFSET') {
@@ -588,34 +817,56 @@ function collectFloatSamples(binding: KeyframeBinding): FloatSample[] {
         }
         samples.push({
           time: keyframe.timelinePosition,
-          value: figmaRawTranslationToPagx(keyframe.value.value),
+          value: resolveFloatKeyframeValue(
+            keyframe.value.value,
+            track.keyframeOperation,
+            translationContext,
+          ),
           easing: keyframe.easing,
         });
       }
       continue;
     }
 
-    usesSetTrack = true;
+    if (track.keyframeOperation === 'SET') {
+      usesSetKeyframeTrack = true;
+    }
+
     for (const keyframe of track.keyframes) {
       if (keyframe.value.type !== 'FLOAT') {
         continue;
       }
       samples.push({
         time: keyframe.timelinePosition,
-        value: figmaRawTranslationToPagx(keyframe.value.value),
+        value: resolveFloatKeyframeValue(
+          keyframe.value.value,
+          track.keyframeOperation,
+          translationContext,
+        ),
         easing: keyframe.easing,
       });
     }
   }
 
-  if (usesSetTrack) {
-    samples.push({ time: 0, value: figmaRawTranslationToPagx(base), easing: LINEAR_EASING });
+  if (usesSetKeyframeTrack) {
+    const hasKeyframeAtZero = samples.some((sample) => Math.abs(sample.time) < 1e-6);
+    if (!hasKeyframeAtZero) {
+      samples.push({
+        time: 0,
+        value: resolveFloatKeyframeValue(base, 'SET', translationContext),
+        easing: LINEAR_EASING,
+      });
+    }
   }
 
   return sortAndDedupeFloatSamples(samples);
 }
 
-function collectVectorSamples(binding: KeyframeBinding): VectorSample[] {
+function collectVectorSamples(
+  binding: KeyframeBinding,
+  node?: SceneNode,
+  parent?: SceneNode | null,
+): VectorSample[] {
   const baseX = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.x : 0;
   const baseY = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.y : 0;
   const samples: VectorSample[] = [];
@@ -629,8 +880,12 @@ function collectVectorSamples(binding: KeyframeBinding): VectorSample[] {
         }
         samples.push({
           time: keyframe.timelinePosition,
-          x: figmaRawTranslationToPagx(keyframe.value.value.x),
-          y: figmaRawTranslationToPagx(keyframe.value.value.y),
+          x: node
+            ? figmaOffsetValueToPagx(keyframe.value.value.x, 'x', node, parent ?? null)
+            : figmaRawTranslationToPagx(keyframe.value.value.x),
+          y: node
+            ? figmaOffsetValueToPagx(keyframe.value.value.y, 'y', node, parent ?? null)
+            : figmaRawTranslationToPagx(keyframe.value.value.y),
           easing: keyframe.easing,
         });
       }
@@ -1007,7 +1262,11 @@ function resolveRotationPivot(
   return { x: width / 2, y: height / 2 };
 }
 
-function readTransformSamples(node: MotionCapableNode, diagnostics: Diagnostic[]): {
+function readTransformSamples(
+  node: MotionCapableNode,
+  parent: SceneNode | null,
+  diagnostics: Diagnostic[],
+): {
   translationX: FloatSample[];
   translationY: FloatSample[];
   translationXY: VectorSample[];
@@ -1028,9 +1287,15 @@ function readTransformSamples(node: MotionCapableNode, diagnostics: Diagnostic[]
     }
   }
 
-  const translationX = bindings.TRANSLATION_X ? collectFloatSamples(bindings.TRANSLATION_X) : [];
-  const translationY = bindings.TRANSLATION_Y ? collectFloatSamples(bindings.TRANSLATION_Y) : [];
-  const translationXY = bindings.TRANSLATION_XY ? collectVectorSamples(bindings.TRANSLATION_XY) : [];
+  const translationX = bindings.TRANSLATION_X
+    ? collectFloatSamples(bindings.TRANSLATION_X, { axis: 'x', node, parent })
+    : [];
+  const translationY = bindings.TRANSLATION_Y
+    ? collectFloatSamples(bindings.TRANSLATION_Y, { axis: 'y', node, parent })
+    : [];
+  const translationXY = bindings.TRANSLATION_XY
+    ? collectVectorSamples(bindings.TRANSLATION_XY, node, parent)
+    : [];
   const rotation = bindings.ROTATION ? collectFloatSamples(bindings.ROTATION) : defaultRotationSamples();
   const scaleX = bindings.SCALE_X ? collectFloatSamples(bindings.SCALE_X) : defaultScaleSamples(1);
   const scaleY = bindings.SCALE_Y ? collectFloatSamples(bindings.SCALE_Y) : defaultScaleSamples(1);
@@ -1068,14 +1333,256 @@ function hasTransformAnimation(samples: ReturnType<typeof readTransformSamples>)
     || isAnimatedVector(samples.scaleXY);
 }
 
-function buildMatrixSampleTimes(
+type MatrixTransformStep = 'translation' | 'scale' | 'rotation';
+
+type AffineMatrix = {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  tx: number;
+  ty: number;
+};
+
+const IDENTITY_AFFINE_MATRIX: AffineMatrix = {
+  a: 1,
+  b: 0,
+  c: 0,
+  d: 1,
+  tx: 0,
+  ty: 0,
+};
+
+function mapStyleToMatrixTransformStep(style: AppliedAnimationStyle): MatrixTransformStep | null {
+  const name = style.name ?? '';
+  const type = typeof style.props?.type === 'string' ? style.props.type : '';
+
+  if (name.includes('position') || type.startsWith('slide_')) {
+    return 'translation';
+  }
+  if (name.includes('scale') || type === 'scaleIn' || type === 'scaleOut') {
+    return 'scale';
+  }
+  if (name.includes('rotation') || type === 'rotateIn' || type === 'rotateOut' || type === 'custom') {
+    return 'rotation';
+  }
+
+  return null;
+}
+
+function resolveMatrixTransformOrder(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+): MatrixTransformStep[] {
+  const order: MatrixTransformStep[] = [];
+  for (const style of node.animationStyles ?? []) {
+    const step = mapStyleToMatrixTransformStep(style);
+    if (step && !order.includes(step)) {
+      order.push(step);
+    }
+  }
+  if (order.length > 0) {
+    return order;
+  }
+
+  const fallback: MatrixTransformStep[] = [];
+  if (
+    isAnimatedFloat(transformSamples.translationX)
+    || isAnimatedFloat(transformSamples.translationY)
+    || isAnimatedVector(transformSamples.translationXY)
+  ) {
+    fallback.push('translation');
+  }
+  if (isAnimatedFloat(transformSamples.scaleX) || isAnimatedFloat(transformSamples.scaleY)) {
+    fallback.push('scale');
+  }
+  if (isAnimatedFloat(transformSamples.rotation)) {
+    fallback.push('rotation');
+  }
+  return fallback;
+}
+
+function multiplyAffineMatrices(left: AffineMatrix, right: AffineMatrix): AffineMatrix {
+  return {
+    a: left.a * right.a + left.c * right.b,
+    b: left.b * right.a + left.d * right.b,
+    c: left.a * right.c + left.c * right.d,
+    d: left.b * right.c + left.d * right.d,
+    tx: left.a * right.tx + left.c * right.ty + left.tx,
+    ty: left.b * right.tx + left.d * right.ty + left.ty,
+  };
+}
+
+function translationAffineMatrix(translationX: number, translationY: number): AffineMatrix {
+  return {
+    a: 1,
+    b: 0,
+    c: 0,
+    d: 1,
+    tx: translationX,
+    ty: translationY,
+  };
+}
+
+function scaleAroundPivotAffineMatrix(
+  scaleX: number,
+  scaleY: number,
+  pivotX: number,
+  pivotY: number,
+): AffineMatrix {
+  return multiplyAffineMatrices(
+    multiplyAffineMatrices(
+      translationAffineMatrix(pivotX, pivotY),
+      { a: scaleX, b: 0, c: 0, d: scaleY, tx: 0, ty: 0 },
+    ),
+    translationAffineMatrix(-pivotX, -pivotY),
+  );
+}
+
+function rotationAroundPivotAffineMatrix(
+  rotationDegrees: number,
+  pivotX: number,
+  pivotY: number,
+): AffineMatrix {
+  const rad = (rotationDegrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return multiplyAffineMatrices(
+    multiplyAffineMatrices(
+      translationAffineMatrix(pivotX, pivotY),
+      { a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0 },
+    ),
+    translationAffineMatrix(-pivotX, -pivotY),
+  );
+}
+
+function buildTransformStepAffineMatrix(
+  step: MatrixTransformStep,
+  translationX: number,
+  translationY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDegrees: number,
+  pivotX: number,
+  pivotY: number,
+): AffineMatrix {
+  switch (step) {
+    case 'translation':
+      return translationAffineMatrix(translationX, translationY);
+    case 'scale':
+      return scaleAroundPivotAffineMatrix(scaleX, scaleY, pivotX, pivotY);
+    case 'rotation':
+      return rotationAroundPivotAffineMatrix(rotationDegrees, pivotX, pivotY);
+  }
+}
+
+function composeAffineMatrixFromTransformOrder(
+  order: MatrixTransformStep[],
+  translationX: number,
+  translationY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDegrees: number,
+  pivotX: number,
+  pivotY: number,
+): AffineMatrix {
+  let matrix = IDENTITY_AFFINE_MATRIX;
+  for (const step of order) {
+    const stepMatrix = buildTransformStepAffineMatrix(
+      step,
+      translationX,
+      translationY,
+      scaleX,
+      scaleY,
+      rotationDegrees,
+      pivotX,
+      pivotY,
+    );
+    matrix = multiplyAffineMatrices(stepMatrix, matrix);
+  }
+  return matrix;
+}
+
+function affineMatrixToString(matrix: AffineMatrix): string {
+  if (
+    Math.abs(matrix.a - 1) < 1e-4
+    && Math.abs(matrix.b) < 1e-4
+    && Math.abs(matrix.c) < 1e-4
+    && Math.abs(matrix.d - 1) < 1e-4
+    && Math.abs(matrix.tx) < 1e-4
+    && Math.abs(matrix.ty) < 1e-4
+  ) {
+    return '1,0,0,1,0,0';
+  }
+
+  return `${roundDimension(matrix.a)},${roundDimension(matrix.b)},${roundDimension(matrix.c)},${roundDimension(matrix.d)},${roundDimension(matrix.tx)},${roundDimension(matrix.ty)}`;
+}
+
+function maxSampleTimeSeconds(samples: Array<{ time: number }>): number {
+  let max = 0;
+  for (const sample of samples) {
+    max = Math.max(max, sample.time);
+  }
+  return max;
+}
+
+function maxTransformKeyframeSeconds(
   transformSamples: ReturnType<typeof readTransformSamples>,
   sizeSamples: ReturnType<typeof readSizeSamples>,
-  durationFrames: number,
+): number {
+  return Math.max(
+    maxSampleTimeSeconds(transformSamples.translationX),
+    maxSampleTimeSeconds(transformSamples.translationY),
+    maxSampleTimeSeconds(transformSamples.translationXY),
+    maxSampleTimeSeconds(transformSamples.rotation),
+    maxSampleTimeSeconds(transformSamples.scaleX),
+    maxSampleTimeSeconds(transformSamples.scaleY),
+    maxSampleTimeSeconds(transformSamples.scaleXY),
+    maxSampleTimeSeconds(sizeSamples.width),
+    maxSampleTimeSeconds(sizeSamples.height),
+  );
+}
+
+function resolveRotationBase(binding: KeyframeBinding | undefined): number {
+  // OFFSET 与 SET 的动画增量都以 0 为基准；静止角 baseValue 由静态 Layer matrix 表达
+  return 0;
+}
+
+function shouldBakeMatrixPerFrame(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+): boolean {
+  const transformStyleCount = (node.animationStyles ?? [])
+    .filter((style) => mapStyleToMatrixTransformStep(style) !== null).length;
+  if (transformStyleCount > 1) {
+    return true;
+  }
+
+  const animatedChannelCount = [
+    isAnimatedFloat(transformSamples.translationX),
+    isAnimatedFloat(transformSamples.translationY),
+    isAnimatedVector(transformSamples.translationXY),
+    isAnimatedFloat(transformSamples.scaleX),
+    isAnimatedFloat(transformSamples.scaleY),
+    isAnimatedFloat(transformSamples.rotation),
+  ].filter(Boolean).length;
+  if (animatedChannelCount > 1) {
+    return true;
+  }
+
+  // rotateOut 360° 等整圈动画起止 matrix 相同，必须逐帧烘焙中间过程
+  return isAnimatedFloat(transformSamples.rotation);
+}
+
+function buildMatrixSampleTimes(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+  sizeSamples: ReturnType<typeof readSizeSamples>,
 ): number[] {
-  if (isAnimatedFloat(transformSamples.rotation)) {
+  if (shouldBakeMatrixPerFrame(node, transformSamples)) {
+    const endFrame = Math.max(1, secondsToFrame(maxTransformKeyframeSeconds(transformSamples, sizeSamples)));
     const times: number[] = [];
-    for (let frame = 0; frame <= durationFrames; frame += 1) {
+    for (let frame = 0; frame <= endFrame; frame += 1) {
       times.push(frame / MOTION_FRAME_RATE);
     }
     return times;
@@ -1093,7 +1600,7 @@ function buildMatrixChannel(
   diagnostics: Diagnostic[],
   durationFrames: number,
 ): PagxChannel | null {
-  const transformSamples = readTransformSamples(node, diagnostics);
+  const transformSamples = readTransformSamples(node, parent, diagnostics);
   const sizeSamples = readSizeSamples(node, diagnostics);
   const hasTransform = hasTransformAnimation(transformSamples);
   const hasSize = hasSizeAnimation(sizeSamples);
@@ -1101,14 +1608,21 @@ function buildMatrixChannel(
     return null;
   }
 
-  const useEasedSampling = isAnimatedFloat(transformSamples.rotation);
-  const sampleFloat = useEasedSampling ? sampleFloatAtEased : sampleFloatAt;
-  const sampleTimes = buildMatrixSampleTimes(transformSamples, sizeSamples, durationFrames);
-  const rotationBase = transformSamples.rotation[0]?.value ?? 0;
+  const bakePerFrame = shouldBakeMatrixPerFrame(node, transformSamples);
+  const sampleFloat = bakePerFrame ? sampleFloatAtEased : sampleFloatAt;
+  const sampleTimes = buildMatrixSampleTimes(node, transformSamples, sizeSamples);
+  const rotationBinding = node.animations.ROTATION;
+  const rotationBase = resolveRotationBase(rotationBinding);
   const rotationDirection = resolveRotationDirection(node);
+  const rotationPresetType = resolveRotationPresetType(node);
+  const usesSetRotation = hasSetRotationAnimation(node);
+  const setRotationOrigin = usesSetRotation && rotationBinding
+    ? readSetRotationOrigin(rotationBinding)
+    : null;
   const setTranslationOrigin = hasSetTranslationAnimation(node)
     ? readSetTranslationOrigin(node, transformSamples)
     : null;
+  const transformOrder = resolveMatrixTransformOrder(node, transformSamples);
 
   const keyframes: PagxKeyframe[] = [];
   for (const time of sampleTimes) {
@@ -1147,21 +1661,42 @@ function buildMatrixChannel(
     scaleX *= sizeScale.scaleX;
     scaleY *= sizeScale.scaleY;
 
-    const rotation = applyRotationDirection(
-      sampleFloat(transformSamples.rotation, time),
+    let rotationSample = sampleFloat(transformSamples.rotation, time);
+    if (setRotationOrigin !== null) {
+      rotationSample -= setRotationOrigin;
+    }
+
+    const rotation = figmaRotationDegreesToPagx(
+      applyRotationDirection(
+        rotationSample,
+        rotationDirection,
+        rotationBase,
+      ),
+      rotationPresetType,
       rotationDirection,
-      rotationBase,
+      usesSetRotation,
     );
     const pivot = resolveRotationPivot(node, sizeSamples, time, scaleX, scaleY);
-    const matrix = pagxMotionMatrixStringFromComponents(
-      translationX,
-      translationY,
-      rotation,
-      scaleX,
-      scaleY,
-      pivot.x,
-      pivot.y,
-    ) ?? '1,0,0,1,0,0';
+    const matrix = transformOrder.length > 0
+      ? affineMatrixToString(composeAffineMatrixFromTransformOrder(
+        transformOrder,
+        translationX,
+        translationY,
+        scaleX,
+        scaleY,
+        rotation,
+        pivot.x,
+        pivot.y,
+      ))
+      : (pagxMotionMatrixStringFromComponents(
+        translationX,
+        translationY,
+        rotation,
+        scaleX,
+        scaleY,
+        pivot.x,
+        pivot.y,
+      ) ?? '1,0,0,1,0,0');
 
     keyframes.push({
       time: secondsToFrame(time),
@@ -1258,6 +1793,45 @@ export function applyRotationDirectionForTest(
   return applyRotationDirection(degrees, direction, baseDegrees);
 }
 
+export function resolveRotationDirectionFromPropsForTest(
+  props: Record<string, unknown>,
+): RotationDirection | null {
+  return readRotationDirectionFromProps(props);
+}
+
+export function resolvePagxRotationDegreesForTest(
+  degrees: number,
+  direction: RotationDirection | null,
+  baseDegrees: number,
+  presetType: RotationPresetType | null = null,
+  usesSetRotation = false,
+): number {
+  return figmaRotationDegreesToPagx(
+    applyRotationDirection(degrees, direction, baseDegrees),
+    presetType,
+    direction,
+    usesSetRotation,
+  );
+}
+
+export function resolveRotationBaseForTest(binding: KeyframeBinding | undefined): number {
+  return resolveRotationBase(binding);
+}
+
+export function shouldBakeMatrixPerFrameForTest(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+): boolean {
+  return shouldBakeMatrixPerFrame(node, transformSamples);
+}
+
+export function buildMatrixChannelForTest(
+  node: MotionCapableNode,
+  parent: SceneNode | null = null,
+): PagxChannel | null {
+  return buildMatrixChannel(node, parent, [], 120);
+}
+
 export function springProgressForTest(progress: number, bounce: number): number {
   return springProgress(progress, bounce);
 }
@@ -1266,12 +1840,47 @@ export function sampleFloatAtEasedForTest(samples: FloatSample[], time: number):
   return sampleFloatAtEased(samples, time);
 }
 
-export function collectFloatSamplesForTest(binding: KeyframeBinding): FloatSample[] {
-  return collectFloatSamples(binding);
+export function collectFloatSamplesForTest(
+  binding: KeyframeBinding,
+  translationContext?: TranslationSampleContext,
+): FloatSample[] {
+  return collectFloatSamples(binding, translationContext);
 }
 
-export function readFigmaTranslationSpanForTest(node: MotionCapableNode): { x: number; y: number } | null {
-  return readPagxTranslationSpan(node);
+export function resolveMatrixTransformOrderForTest(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+): MatrixTransformStep[] {
+  return resolveMatrixTransformOrder(node, transformSamples);
+}
+
+export function composeMotionMatrixForTest(
+  order: MatrixTransformStep[],
+  translationX: number,
+  translationY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDegrees: number,
+  pivotX: number,
+  pivotY: number,
+): string {
+  return affineMatrixToString(composeAffineMatrixFromTransformOrder(
+    order,
+    translationX,
+    translationY,
+    scaleX,
+    scaleY,
+    rotationDegrees,
+    pivotX,
+    pivotY,
+  ));
+}
+
+export function readFigmaTranslationSpanForTest(
+  node: MotionCapableNode,
+  parent: SceneNode | null = null,
+): { x: number; y: number } | null {
+  return readPagxTranslationSpan(node, parent);
 }
 
 export function resolveMatrixTranslationForTest(
@@ -1305,9 +1914,10 @@ export function resolveMatrixTranslationForTest(
 
 export function readTransformSamplesForTest(
   node: MotionCapableNode,
+  parent: SceneNode | null = null,
   diagnostics: Diagnostic[] = [],
 ): ReturnType<typeof readTransformSamples> {
-  return readTransformSamples(node, diagnostics);
+  return readTransformSamples(node, parent, diagnostics);
 }
 
 export function collectMotionAnimations(
