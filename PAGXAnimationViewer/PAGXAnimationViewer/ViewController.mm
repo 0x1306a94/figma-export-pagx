@@ -25,6 +25,8 @@
 #import "pagx/PAGTimeline.h"
 #import "pagx/PAGXDocument.h"
 #import "pagx/PAGXImporter.h"
+#import "pagx/PAGXOptimizer.h"
+#import "pagx/SVGImporter.h"
 #import "pagx/nodes/Animation.h"
 #import "tgfx/gpu/Context.h"
 #import "tgfx/gpu/opengl/GLDevice.h"
@@ -167,7 +169,16 @@ using namespace pagx;
 }
 
 - (BOOL)loadSceneFromFile:(NSString *)filePath {
-    auto document = PAGXImporter::FromFile(filePath.UTF8String);
+    std::shared_ptr<PAGXDocument> document = nullptr;
+    if ([filePath.pathExtension.lowercaseString isEqualToString:@"pagx"]) {
+        document = PAGXImporter::FromFile(filePath.UTF8String);
+    } else if ([filePath.pathExtension.lowercaseString isEqualToString:@"svg"]) {
+        document = SVGImporter::Parse(filePath.UTF8String);
+        if (document) {
+            PAGXOptimizer::Optimize(document.get());
+        }
+    }
+
     if (!document) {
         std::cerr << "pagx viewer: failed to load '" << filePath.UTF8String << "'\n";
         return NO;

@@ -42,10 +42,10 @@
         return nil;
     }
 
-    NSArray<NSURL *> *fileURLs =
-        [pasteboard readObjectsForClasses:@[[NSURL class]] options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+    NSSet<NSString *> *allowExtensions = [NSSet<NSString *> setWithObjects:@"pagx", @"svg", nil];
+    NSArray<NSURL *> *fileURLs = [pasteboard readObjectsForClasses:@[[NSURL class]] options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
     for (NSURL *fileURL in fileURLs) {
-        if (fileURL.isFileURL && [fileURL.pathExtension.lowercaseString isEqualToString:@"pagx"]) {
+        if (fileURL.isFileURL && [allowExtensions containsObject:fileURL.pathExtension.lowercaseString]) {
             return fileURL.path;
         }
     }
