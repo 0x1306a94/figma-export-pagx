@@ -1,0 +1,14 @@
+//
+//  Config.xcconfig
+//  PAGXAnimationViewer
+//
+//  Created by king on 2026/7/7.
+//
+
+// Configuration settings file format documentation can be found at:
+// https://developer.apple.com/documentation/xcode/adding-a-build-configuration-file-to-your-project
+
+HEADER_SEARCH_PATHS = $(SRCROOT)/../libpag/include $(SRCROOT)/../libpag/third_party/tgfx/include
+LIBRARY_SEARCH_PATHS = $(SRCROOT)/../build_libpag
+OTHER_LDFLAGS = -lpag -framework OpenGL -framework QuartzCore
+GCC_PREPROCESSOR_DEFINITIONS = GL_SILENCE_DEPRECATION
