@@ -6,7 +6,7 @@ import type {
   PagxKeyframe,
 } from './types';
 import { roundDimension } from './color';
-import { addDiagnostic, layoutPositionAttrs, nodeBoundsInParent, pagxMotionMatrixStringFromComponents } from './figma-reader';
+import { addDiagnostic, layoutPositionAttrs, nodeBoundsInParent, nodePositionInParent, pagxMotionMatrixStringFromComponents } from './figma-reader';
 
 export const MOTION_FRAME_RATE = 60;
 const MOTION_ANIMATION_ID = 'motion-main';
@@ -309,16 +309,22 @@ function shouldNegateOffsetForAxis(
 
   if (
     parent
-    && 'x' in node
-    && 'y' in node
     && 'width' in node
     && 'height' in node
     && 'width' in parent
     && 'height' in parent
   ) {
-    const distanceToLeft = node.x;
-    const distanceToRight = parent.width - (node.x + node.width);
-    return distanceToRight < distanceToLeft;
+    // GROUP 子节点的 node.x/y 常为画布绝对坐标；Figma OFFSET 符号已与 PAGX 一致，不做靠边角取反。
+    if (parent.type === 'GROUP') {
+      return readConstraintAxis(node, axis) === 'MAX';
+    }
+
+    const position = nodePositionInParent(node, parent);
+    if (position.left !== undefined) {
+      const distanceToLeft = position.left;
+      const distanceToRight = parent.width - (position.left + node.width);
+      return distanceToRight < distanceToLeft;
+    }
   }
 
   const constraint = readConstraintAxis(node, axis);
@@ -503,7 +509,7 @@ export function motionLayoutPositionForExport(
   }
 
   const bbox = nodeBoundsInParent(node, parent);
-  if (bbox && 'x' in node && 'y' in node) {
+  if (bbox && parent.type !== 'GROUP' && 'x' in node && 'y' in node) {
     const shiftX = bbox.left - node.x;
     const shiftY = bbox.top - node.y;
     const epsilon = 1e-2;

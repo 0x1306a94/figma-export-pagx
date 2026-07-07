@@ -516,6 +516,35 @@ function testPivotMatrixAtMinus90(): void {
   assert.equal(matrix, '0,-1,1,0,5,78');
 }
 
+function testGroupChildSlideInLeftKeepsRawOffset(): void {
+  const groupParent = {
+    type: 'GROUP',
+    width: 649,
+    height: 1034,
+    absoluteTransform: [[1, 0, 136], [0, 1, 1534]],
+    absoluteBoundingBox: { x: 136, y: 1534, width: 649, height: 1034 },
+  } as SceneNode;
+
+  const rect7 = {
+    type: 'RECTANGLE',
+    x: 342,
+    y: 1777,
+    width: 401,
+    height: 521,
+    constraints: { horizontal: 'MIN', vertical: 'MIN' },
+    absoluteTransform: [[1, 0, 342], [0, 1, 1777]],
+    absoluteBoundingBox: { x: 342, y: 1777, width: 401, height: 521 },
+  } as SceneNode;
+
+  const samples = collectFloatSamplesForTest(slideInLeftBinding, {
+    axis: 'x',
+    node: rect7,
+    parent: groupParent,
+  });
+  assert.equal(samples[0].value, -200);
+  assert.equal(samples[1].value, 0);
+}
+
 function run(): void {
   testSpringOvershoot();
   testRotationSamplingUsesSpring();
@@ -534,6 +563,7 @@ function run(): void {
   testOffsetTranslationNegatesWhenCloserToParentRightEdge();
   testOffsetTranslationKeepsRawWhenCloserToParentLeftEdge();
   testOffsetTranslationRightDirectionNearParentRightEdge();
+  testGroupChildSlideInLeftKeepsRawOffset();
   testScaleSamplesKeepRawValues();
   testRotationOffsetSamplesKeepRawValues();
   testSlideInBottomKeepsPositiveYOffset();

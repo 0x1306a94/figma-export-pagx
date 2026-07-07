@@ -409,6 +409,11 @@ export function nodeBoundsInParent(
 }
 
 function usesBboxForLayout(node: SceneNode, parent: SceneNode): boolean {
+  // GROUP 子节点的 node.x/y 常为画布绝对坐标，必须用 AABB 差值得到父级局部位置。
+  if (parent.type === 'GROUP') {
+    return true;
+  }
+
   const local = localTransformRelativeToParent(node, parent);
   if (!local) {
     return true;

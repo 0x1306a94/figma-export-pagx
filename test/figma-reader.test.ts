@@ -203,6 +203,35 @@ assert(
   'axis-aligned node should use Position panel x',
 );
 
+const groupParentAt1534 = mockNode({
+  type: 'GROUP',
+  absoluteTransform: [[1, 0, 136], [0, 1, 1534]],
+  absoluteBoundingBox: { x: 136, y: 1534, width: 649, height: 1034 },
+  x: 136,
+  y: 1534,
+});
+
+const groupChildRect7 = mockNode({
+  type: 'RECTANGLE',
+  x: 342,
+  y: 1777,
+  absoluteTransform: [[1, 0, 342], [0, 1, 1777]],
+  absoluteBoundingBox: { x: 342, y: 1777, width: 401, height: 521 },
+});
+
+assert(
+  nodePositionInParent(groupChildRect7, groupParentAt1534).left === 206,
+  'group child should use bbox left relative to parent',
+);
+assert(
+  nodePositionInParent(groupChildRect7, groupParentAt1534).top === 243,
+  'group child should use bbox top relative to parent',
+);
+assert(
+  nodeMatrixInParent(groupChildRect7, groupParentAt1534) === undefined,
+  'axis-aligned group child should not need compensating matrix',
+);
+
 assert(
   pagxMotionMatrixStringFromComponents(0, 0, -90, 1, 1, 41, 37.5) === '0,-1,1,0,3.5,78.5',
   'motion matrix should rotate around pivot instead of origin',
