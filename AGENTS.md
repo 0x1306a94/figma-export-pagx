@@ -76,10 +76,9 @@ cd libpag
 ./sync_deps.sh
 cd ..
 mkdir build_libpag
-cd build_libpag
 
-cmake -DPAG_BUILD_CLI=ON -DPAG_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release ../libpag
-cmake --build . --target pagx-cli -j$(sysctl -n hw.ncpu)
+cmake -DPAG_BUILD_CLI=ON -DPAG_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release -B build_libpag -S libpag
+cmake --build build_libpag --target pagx-cli -j$(sysctl -n hw.ncpu)
 
 # 使用时
 build_libpag/pagx
