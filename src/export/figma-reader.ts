@@ -408,6 +408,63 @@ function nodeBoundsInParent(
   return null;
 }
 
+function usesBboxForLayout(node: SceneNode, parent: SceneNode): boolean {
+  const local = localTransformRelativeToParent(node, parent);
+  if (!local) {
+    return true;
+  }
+
+  const a = local[0][0];
+  const b = local[1][0];
+  const c = local[0][1];
+  const d = local[1][1];
+  const epsilon = 1e-4;
+
+  if (Math.abs(b) >= epsilon || Math.abs(c) >= epsilon) {
+    return true;
+  }
+
+  if (a < 0 || d < 0) {
+    return true;
+  }
+
+  return false;
+}
+
+function resolvedLayoutPosition(
+  node: SceneNode,
+  parent: SceneNode,
+): { left: number; top: number } | null {
+  if (!usesBboxForLayout(node, parent) && 'x' in node && 'y' in node) {
+    return {
+      left: node.x,
+      top: node.y,
+    };
+  }
+
+  const bounds = nodeBoundsInParent(node, parent);
+  if (bounds) {
+    return bounds;
+  }
+
+  const local = localTransformRelativeToParent(node, parent);
+  if (local) {
+    return {
+      left: local[0][2],
+      top: local[1][2],
+    };
+  }
+
+  if ('x' in node && 'y' in node) {
+    return {
+      left: node.x,
+      top: node.y,
+    };
+  }
+
+  return null;
+}
+
 export function nodeMatrixInParent(node: SceneNode, parent: SceneNode | null): string | undefined {
   if (!parent) {
     return undefined;
@@ -424,15 +481,79 @@ export function nodeMatrixInParent(node: SceneNode, parent: SceneNode | null): s
   const d = local[1][1];
   const transformX = local[0][2];
   const transformY = local[1][2];
-  const bounds = nodeBoundsInParent(node, parent);
-  const matrixX = bounds ? transformX - bounds.left : transformX;
-  const matrixY = bounds ? transformY - bounds.top : transformY;
+  const layout = resolvedLayoutPosition(node, parent);
+  const matrixX = layout ? transformX - layout.left : transformX;
+  const matrixY = layout ? transformY - layout.top : transformY;
 
   if (isIdentityRotation(a, b, c, d) && isZeroTranslation(matrixX, matrixY)) {
     return undefined;
   }
 
   return `${roundDimension(a)},${roundDimension(b)},${roundDimension(c)},${roundDimension(d)},${roundDimension(matrixX)},${roundDimension(matrixY)}`;
+}
+
+export function pagxMatrixStringFromComponents(
+  translationX: number,
+  translationY: number,
+  rotationDegrees: number,
+  scaleX: number,
+  scaleY: number,
+  node: SceneNode,
+  parent: SceneNode | null,
+  options?: { motionOffset?: boolean },
+): string | undefined {
+  const rad = (rotationDegrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const a = scaleX * cos;
+  const b = scaleX * sin;
+  const c = -scaleY * sin;
+  const d = scaleY * cos;
+  const motionOffset = options?.motionOffset ?? false;
+  const layout = parent ? resolvedLayoutPosition(node, parent) : null;
+  const matrixX = motionOffset
+    ? translationX
+    : (layout ? translationX - layout.left : translationX);
+  const matrixY = motionOffset
+    ? translationY
+    : (layout ? translationY - layout.top : translationY);
+
+  if (isIdentityRotation(a, b, c, d) && isZeroTranslation(matrixX, matrixY)) {
+    return undefined;
+  }
+
+  return `${roundDimension(a)},${roundDimension(b)},${roundDimension(c)},${roundDimension(d)},${roundDimension(matrixX)},${roundDimension(matrixY)}`;
+}
+
+export function pagxMotionMatrixStringFromComponents(
+  translationX: number,
+  translationY: number,
+  rotationDegrees: number,
+  scaleX: number,
+  scaleY: number,
+  pivotX: number,
+  pivotY: number,
+): string | undefined {
+  const rad = (rotationDegrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const a = scaleX * cos;
+  const b = scaleX * sin;
+  const c = -scaleY * sin;
+  const d = scaleY * cos;
+
+  let tx = translationX;
+  let ty = translationY;
+  if (Math.abs(rotationDegrees) > 1e-4) {
+    tx += pivotX * (1 - a) - pivotY * c;
+    ty += pivotY * (1 - d) - pivotX * b;
+  }
+
+  if (isIdentityRotation(a, b, c, d) && isZeroTranslation(tx, ty)) {
+    return undefined;
+  }
+
+  return `${roundDimension(a)},${roundDimension(b)},${roundDimension(c)},${roundDimension(d)},${roundDimension(tx)},${roundDimension(ty)}`;
 }
 
 export function geometryPathData(node: GeometryMixin & { type?: string; width?: number; height?: number }): string {
@@ -461,26 +582,15 @@ export function nodePositionInParent(
     return {};
   }
 
-  const bounds = nodeBoundsInParent(node, parent);
-  if (bounds) {
+  const layout = resolvedLayoutPosition(node, parent);
+  if (layout) {
     return {
-      left: roundDimension(bounds.left),
-      top: roundDimension(bounds.top),
+      left: roundDimension(layout.left),
+      top: roundDimension(layout.top),
     };
   }
 
-  const local = localTransformRelativeToParent(node, parent);
-  if (local) {
-    return {
-      left: roundDimension(local[0][2]),
-      top: roundDimension(local[1][2]),
-    };
-  }
-
-  return {
-    left: roundDimension(node.x),
-    top: roundDimension(node.y),
-  };
+  return {};
 }
 
 export function parentUsesAutoLayout(parent: SceneNode | null): boolean {

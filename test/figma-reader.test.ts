@@ -3,6 +3,7 @@ import {
   layoutPositionAttrs,
   nodeMatrixInParent,
   nodePositionInParent,
+  pagxMotionMatrixStringFromComponents,
   readAutoLayoutAttrs,
   readFlexGrow,
 } from '../src/export/figma-reader';
@@ -99,8 +100,8 @@ assert(
     mockNode({
       absoluteTransform: [[1, 0, 1881], [0, 1, 2136]],
       absoluteBoundingBox: { x: 1881, y: 2136, width: 4438, height: 2714 },
-      x: 1881,
-      y: 2136,
+      x: 0,
+      y: 0,
     }),
     parentAt1881,
   ).left === 0,
@@ -112,12 +113,12 @@ assert(
     mockNode({
       absoluteTransform: [[1, 0, 5635], [0, 1, 2975]],
       absoluteBoundingBox: { x: 5635, y: 2975, width: 562, height: 1049 },
-      x: 5635,
-      y: 2975,
+      x: 3754,
+      y: 839,
     }),
     parentAt1881,
   ).left === 3754,
-  'nested group should use local transform translation',
+  'nested group should use Position panel x',
 );
 
 assert(
@@ -178,6 +179,33 @@ assert(
 assert(
   nodePositionInParent(flippedVector, groupParent).left! + 426 <= 562,
   'flipped vector layout box should fit parent width',
+);
+
+const motionPanelChild = mockNode({
+  type: 'RECTANGLE',
+  x: 175,
+  y: 63,
+  absoluteTransform: [[1, 0, 175], [0, 1, 63]],
+  absoluteBoundingBox: { x: 175, y: 33, width: 77, height: 60 },
+});
+const motionFrameParent = mockNode({
+  type: 'FRAME',
+  absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+  absoluteBoundingBox: { x: 0, y: 0, width: 300, height: 300 },
+});
+
+assert(
+  nodePositionInParent(motionPanelChild, motionFrameParent).top === 63,
+  'axis-aligned node should use Position panel y instead of bbox top',
+);
+assert(
+  nodePositionInParent(motionPanelChild, motionFrameParent).left === 175,
+  'axis-aligned node should use Position panel x',
+);
+
+assert(
+  pagxMotionMatrixStringFromComponents(0, 0, -90, 1, 1, 41, 37.5) === '0,-1,1,0,3.5,78.5',
+  'motion matrix should rotate around pivot instead of origin',
 );
 
 assert(

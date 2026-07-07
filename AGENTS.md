@@ -77,7 +77,7 @@ cd libpag
 cd ..
 mkdir build_libpag
 
-cmake -DPAG_BUILD_CLI=ON -DPAG_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release -B build_libpag -S libpag
+cmake -DPAG_BUILD_CLI=ON -DPAG_BUILD_SHARED=OFF -DPAG_BUILD_FRAMEWORK=OFF -DCMAKE_BUILD_TYPE=Release -B build_libpag -S libpag
 cmake --build build_libpag --target pagx-cli -j$(sysctl -n hw.ncpu)
 
 # 使用时

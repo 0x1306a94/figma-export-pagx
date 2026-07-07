@@ -25,6 +25,7 @@ import {
   strokesToElements,
 } from './figma-reader';
 import { shapeElementFromPathData } from './path-detect';
+import { collectMotionAnimations, isMotionNode, motionLayoutSizeForExport } from './figma-motion';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,
@@ -195,6 +196,18 @@ async function mapTextNode(
   };
 }
 
+function resolvedNodeSize(node: SceneNode): { width: number; height: number } | null {
+  if (!('width' in node) || !('height' in node)) {
+    return null;
+  }
+
+  const motionSize = motionLayoutSizeForExport(node);
+  return {
+    width: motionSize?.width ?? roundDimension(node.width),
+    height: motionSize?.height ?? roundDimension(node.height),
+  };
+}
+
 function layerBaseAttrs(node: SceneNode, parent: SceneNode | null): Record<string, string | number | boolean> {
   const attrs: Record<string, string | number | boolean> = {
     ...layoutPositionAttrs(node, parent),
@@ -205,9 +218,10 @@ function layerBaseAttrs(node: SceneNode, parent: SceneNode | null): Record<strin
     attrs.matrix = matrix;
   }
 
-  if ('width' in node && 'height' in node) {
-    attrs.width = roundDimension(node.width);
-    attrs.height = roundDimension(node.height);
+  const size = resolvedNodeSize(node);
+  if (size) {
+    attrs.width = size.width;
+    attrs.height = size.height;
   }
 
   const flex = readFlexGrow(node, parent);
@@ -236,13 +250,14 @@ function shapeContents(
 ): PagxElement[] {
   const contents: PagxElement[] = [];
   const nodeId = node.id;
+  const size = resolvedNodeSize(node);
 
   if (node.type === 'RECTANGLE') {
     const attrs: Record<string, string | number | boolean> = {
       left: 0,
       top: 0,
-      width: roundDimension(node.width),
-      height: roundDimension(node.height),
+      width: size?.width ?? roundDimension(node.width),
+      height: size?.height ?? roundDimension(node.height),
     };
     const roundness = readCornerRadius(node, nodeId, ctx.diagnostics);
     if (roundness > 0) {
@@ -255,8 +270,8 @@ function shapeContents(
       attrs: {
         left: 0,
         top: 0,
-        width: roundDimension(node.width),
-        height: roundDimension(node.height),
+        width: size?.width ?? roundDimension(node.width),
+        height: size?.height ?? roundDimension(node.height),
       },
     });
   } else if (node.type === 'TEXT') {
@@ -400,6 +415,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
 
   ctx.nodeCount += 1;
   const layerId = ensureUniqueId(figmaIdToPagxId(node.id, 'layer'), ctx.usedIds);
+  ctx.layerIdByFigmaId.set(node.id, layerId);
 
   if (isContainerNode(node)) {
     const attrs = layerBaseAttrs(node, parent);
@@ -415,11 +431,12 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
     const hasFillOrStroke = (Array.isArray(fills) && fills.length > 0)
       || (Array.isArray(strokes) && strokes.length > 0);
     if (hasFillOrStroke && 'width' in node && 'height' in node) {
+      const frameSize = resolvedNodeSize(node);
       contents.push({
         kind: 'rectangle',
         attrs: {
-          width: roundDimension(node.width),
-          height: roundDimension(node.height),
+          width: frameSize?.width ?? roundDimension(node.width),
+          height: frameSize?.height ?? roundDimension(node.height),
         },
       });
     }
@@ -503,6 +520,7 @@ export function createExportContext(root: SceneNode): ExportContext {
     resources: [],
     usedIds: new Set<string>(),
     nodeCount: 0,
+    layerIdByFigmaId: new Map<string, string>(),
   };
 }
 
@@ -534,10 +552,15 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
     addDiagnostic(ctx.diagnostics, 'error', 'UNSUPPORTED_ROOT', `不支持的 root 节点类型 ${root.type}`, root.id);
   }
 
+  const animations = isMotionNode(root)
+    ? collectMotionAnimations(root, ctx.layerIdByFigmaId, ctx.diagnostics)
+    : [];
+
   return {
     width,
     height,
     resources: ctx.resources,
+    animations,
     layers,
     customData: {
       'data-exported-by': 'figma-export-pagx',

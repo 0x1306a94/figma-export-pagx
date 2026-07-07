@@ -16,6 +16,7 @@ const sampleDocument: PagxDocument = {
   width: 400,
   height: 300,
   resources: [],
+  animations: [],
   customData: {
     'data-exported-by': 'figma-export-pagx',
     'data-figma-root-id': '1:2',
@@ -69,6 +70,7 @@ const gradientDocument: PagxDocument = {
   width: 100,
   height: 100,
   resources: [],
+  animations: [],
   customData: {},
   layers: [
     {

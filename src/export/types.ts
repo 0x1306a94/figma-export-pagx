@@ -64,6 +64,37 @@ export type PagxElement =
 export type PagxResource =
   | { kind: 'image'; id: string; source: string };
 
+export type PagxKeyframeInterpolation = 'linear' | 'none' | 'bezier' | 'hold';
+
+export type PagxKeyframe = {
+  time: number;
+  value: string;
+  interpolation?: PagxKeyframeInterpolation;
+  bezierOut?: string;
+  bezierIn?: string;
+};
+
+export type PagxChannel = {
+  name: string;
+  type: 'float' | 'matrix';
+  keyframes: PagxKeyframe[];
+};
+
+export type PagxAnimationObject = {
+  target: string;
+  channels: PagxChannel[];
+};
+
+export type PagxLoopMode = 'once' | 'loop' | 'pingPong';
+
+export type PagxAnimation = {
+  id: string;
+  duration: number;
+  frameRate: number;
+  loop: PagxLoopMode;
+  objects: PagxAnimationObject[];
+};
+
 export type PagxLayer = {
   id: string;
   name: string;
@@ -77,6 +108,7 @@ export type PagxDocument = {
   width: number;
   height: number;
   resources: PagxResource[];
+  animations: PagxAnimation[];
   layers: PagxLayer[];
   customData: Record<string, string>;
 };
@@ -94,4 +126,5 @@ export type ExportContext = {
   resources: PagxResource[];
   usedIds: Set<string>;
   nodeCount: number;
+  layerIdByFigmaId: Map<string, string>;
 };

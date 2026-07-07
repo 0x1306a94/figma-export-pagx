@@ -82,6 +82,7 @@ const wrappedTextDocument: PagxDocument = {
   width: 402,
   height: 875,
   resources: [],
+  animations: [],
   customData: {},
   layers: [
     {
@@ -116,6 +117,7 @@ const simpleTextDocument: PagxDocument = {
   width: 800,
   height: 600,
   resources: [],
+  animations: [],
   customData: {},
   layers: [
     {

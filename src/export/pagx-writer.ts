@@ -1,7 +1,10 @@
 import type {
   ColorSource,
+  PagxAnimation,
+  PagxChannel,
   PagxDocument,
   PagxElement,
+  PagxKeyframe,
   PagxLayer,
   PagxResource,
 } from './types';
@@ -168,6 +171,54 @@ function writeResource(resource: PagxResource, indent: string): string {
   return '';
 }
 
+function writeKeyframe(keyframe: PagxKeyframe, indent: string): string {
+  let attrs = ` time="${keyframe.time}" value="${formatAttrValue(keyframe.value)}"`;
+  if (keyframe.interpolation && keyframe.interpolation !== 'linear') {
+    attrs += ` interpolation="${keyframe.interpolation}"`;
+  }
+  if (keyframe.bezierOut) {
+    attrs += ` bezier-out="${keyframe.bezierOut}"`;
+  }
+  if (keyframe.bezierIn) {
+    attrs += ` bezier-in="${keyframe.bezierIn}"`;
+  }
+  return `${indent}<Key${attrs}/>\n`;
+}
+
+function writeChannel(channel: PagxChannel, indent: string): string {
+  let result = `${indent}<Channel name="${escapeXml(channel.name)}" type="${channel.type}">\n`;
+  for (const keyframe of channel.keyframes) {
+    result += writeKeyframe(keyframe, `${indent}  `);
+  }
+  result += `${indent}</Channel>\n`;
+  return result;
+}
+
+function writeAnimation(animation: PagxAnimation, indent: string): string {
+  let result = `${indent}<Animation id="${escapeXml(animation.id)}" duration="${animation.duration}" frameRate="${animation.frameRate}" loop="${animation.loop}">\n`;
+  for (const object of animation.objects) {
+    result += `${indent}  <Object target="${escapeXml(object.target)}">\n`;
+    for (const channel of object.channels) {
+      result += writeChannel(channel, `${indent}    `);
+    }
+    result += `${indent}  </Object>\n`;
+  }
+  result += `${indent}</Animation>\n`;
+  return result;
+}
+
+function writeAnimations(animations: PagxAnimation[], indent: string): string {
+  if (animations.length === 0) {
+    return '';
+  }
+  let result = `${indent}<Animations>\n`;
+  for (const animation of animations) {
+    result += writeAnimation(animation, `${indent}  `);
+  }
+  result += `${indent}</Animations>\n`;
+  return result;
+}
+
 export function writePagxXml(document: PagxDocument): string {
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   xml += `<pagx width="${document.width}" height="${document.height}"${writeCustomData(document.customData)}>\n`;
@@ -179,6 +230,8 @@ export function writePagxXml(document: PagxDocument): string {
     }
     xml += '  </Resources>\n';
   }
+
+  xml += writeAnimations(document.animations ?? [], '  ');
 
   for (const layer of document.layers) {
     xml += writeLayer(layer, '  ');
