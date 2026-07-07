@@ -59,6 +59,30 @@
       color: #a12828;
       border-radius: 6px;
     }
+    #motion-panel {
+      margin-top: 12px;
+    }
+    #motion-panel h3 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #motion-hint {
+      margin: 0;
+      color: #666;
+      font-size: 11px;
+    }
+    #motion-json {
+      margin: 6px 0 0;
+      padding: 8px;
+      max-height: 220px;
+      overflow: auto;
+      background: #f5f5f5;
+      border-radius: 6px;
+      font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
@@ -69,12 +93,19 @@
   <div id="meta"></div>
   <div id="error"></div>
   <div id="diagnostics"></div>
+  <div id="motion-panel">
+    <h3>动画数据</h3>
+    <p id="motion-hint">选中一个节点后显示 JSON</p>
+    <pre id="motion-json"></pre>
+  </div>
   <script>
     const exportButton = document.getElementById('export');
     const cancelButton = document.getElementById('cancel');
     const metaEl = document.getElementById('meta');
     const errorEl = document.getElementById('error');
     const diagnosticsEl = document.getElementById('diagnostics');
+    const motionHintEl = document.getElementById('motion-hint');
+    const motionJsonEl = document.getElementById('motion-json');
 
     function showError(message) {
       errorEl.style.display = 'block';
@@ -97,6 +128,17 @@
         div.textContent = `[${item.code}] ${item.message}`;
         diagnosticsEl.appendChild(div);
       }
+    }
+
+    function renderMotionData(msg) {
+      if (!msg.data) {
+        motionHintEl.textContent = msg.hint || '未选中节点';
+        motionJsonEl.textContent = '';
+        return;
+      }
+
+      motionHintEl.textContent = `${msg.nodeName}（${msg.data.length} 个节点）`;
+      motionJsonEl.textContent = JSON.stringify(msg.data, null, 2);
     }
 
     function downloadPagx(xml, fileName) {
@@ -138,6 +180,11 @@
         metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个`;
         renderDiagnostics(msg.diagnostics);
         downloadPagx(msg.xml, msg.fileName);
+        return;
+      }
+
+      if (msg.type === 'selection-motion-data') {
+        renderMotionData(msg);
       }
     };
   </script>

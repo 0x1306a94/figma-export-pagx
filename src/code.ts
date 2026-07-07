@@ -1,10 +1,33 @@
-figma.showUI(__html__, { width: 360, height: 420 });
+figma.showUI(__html__, { width: 360, height: 560 });
 
 import { exportPagx } from './export';
+import { collectMotionDebugData } from './export/figma-motion';
 
 type PluginMessage =
   | { type: 'export-pagx' }
   | { type: 'cancel' };
+
+function sendSelectionMotionData(): void {
+  const selection = figma.currentPage.selection;
+  if (selection.length !== 1) {
+    figma.ui.postMessage({
+      type: 'selection-motion-data',
+      data: null,
+      hint: selection.length === 0 ? '未选中节点' : '请只选择一个节点',
+    });
+    return;
+  }
+
+  const root = selection[0];
+  figma.ui.postMessage({
+    type: 'selection-motion-data',
+    data: collectMotionDebugData(root),
+    nodeName: root.name,
+  });
+}
+
+figma.on('selectionchange', sendSelectionMotionData);
+sendSelectionMotionData();
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
   if (msg.type === 'cancel') {

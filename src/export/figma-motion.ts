@@ -6,7 +6,7 @@ import type {
   PagxKeyframe,
 } from './types';
 import { roundDimension } from './color';
-import { addDiagnostic, pagxMotionMatrixStringFromComponents } from './figma-reader';
+import { addDiagnostic, layoutPositionAttrs, nodeBoundsInParent, pagxMotionMatrixStringFromComponents } from './figma-reader';
 
 export const MOTION_FRAME_RATE = 60;
 const MOTION_ANIMATION_ID = 'motion-main';
@@ -126,11 +126,6 @@ function isMotionNode(node: SceneNode): node is MotionCapableNode {
 
 export { isMotionNode };
 
-function getSizeBinding(animations: Animations, field: SizeField): KeyframeBinding | undefined {
-  const binding = animations[field as keyof Animations];
-  return isKeyframeBinding(binding) ? binding : undefined;
-}
-
 export function motionLayoutSizeForExport(node: SceneNode): { width?: number; height?: number } | undefined {
   if (!isMotionNode(node)) {
     return undefined;
@@ -154,6 +149,200 @@ export function motionLayoutSizeForExport(node: SceneNode): { width?: number; he
     return undefined;
   }
   return size;
+}
+
+function getSizeBinding(animations: Animations, field: SizeField): KeyframeBinding | undefined {
+  const binding = animations[field as keyof Animations];
+  return isKeyframeBinding(binding) ? binding : undefined;
+}
+
+function getTransformBinding(
+  animations: Animations,
+  field: TransformField,
+): KeyframeBinding | undefined {
+  const binding = animations[field];
+  return isKeyframeBinding(binding) ? binding : undefined;
+}
+
+function bindingUsesSetOperation(binding: KeyframeBinding): boolean {
+  return binding.tracks.some((track) => track.keyframeOperation === 'SET');
+}
+
+function hasTranslationAnimation(node: MotionCapableNode): boolean {
+  return !!(
+    getTransformBinding(node.animations, 'TRANSLATION_X')
+    || getTransformBinding(node.animations, 'TRANSLATION_Y')
+    || getTransformBinding(node.animations, 'TRANSLATION_XY')
+  );
+}
+
+function hasSetTranslationAnimation(node: MotionCapableNode): boolean {
+  for (const field of ['TRANSLATION_X', 'TRANSLATION_Y', 'TRANSLATION_XY'] as const) {
+    const binding = getTransformBinding(node.animations, field);
+    if (binding && bindingUsesSetOperation(binding)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function figmaRawTranslationToPagx(value: number): number {
+  return -value || 0;
+}
+
+function readPagxTranslationSpan(node: MotionCapableNode): { x: number; y: number } | null {
+  let minTime = Number.POSITIVE_INFINITY;
+  let maxTime = Number.NEGATIVE_INFINITY;
+  let startX = 0;
+  let startY = 0;
+  let endX = 0;
+  let endY = 0;
+  let hasSample = false;
+
+  const readFloatKeyframes = (binding: KeyframeBinding, axis: 'x' | 'y'): void => {
+    for (const track of binding.tracks) {
+      for (const keyframe of track.keyframes) {
+        if (keyframe.value.type !== 'FLOAT') {
+          continue;
+        }
+        hasSample = true;
+        const pagxValue = figmaRawTranslationToPagx(keyframe.value.value);
+        if (keyframe.timelinePosition <= minTime) {
+          minTime = keyframe.timelinePosition;
+          if (axis === 'x') {
+            startX = pagxValue;
+          } else {
+            startY = pagxValue;
+          }
+        }
+        if (keyframe.timelinePosition >= maxTime) {
+          maxTime = keyframe.timelinePosition;
+          if (axis === 'x') {
+            endX = pagxValue;
+          } else {
+            endY = pagxValue;
+          }
+        }
+      }
+    }
+  };
+
+  const readVectorKeyframes = (binding: KeyframeBinding): void => {
+    for (const track of binding.tracks) {
+      for (const keyframe of track.keyframes) {
+        if (keyframe.value.type !== 'VECTOR') {
+          continue;
+        }
+        hasSample = true;
+        const pagxX = figmaRawTranslationToPagx(keyframe.value.value.x);
+        const pagxY = figmaRawTranslationToPagx(keyframe.value.value.y);
+        if (keyframe.timelinePosition <= minTime) {
+          minTime = keyframe.timelinePosition;
+          startX = pagxX;
+          startY = pagxY;
+        }
+        if (keyframe.timelinePosition >= maxTime) {
+          maxTime = keyframe.timelinePosition;
+          endX = pagxX;
+          endY = pagxY;
+        }
+      }
+    }
+  };
+
+  const translationXY = getTransformBinding(node.animations, 'TRANSLATION_XY');
+  if (translationXY) {
+    readVectorKeyframes(translationXY);
+  } else {
+    const translationX = getTransformBinding(node.animations, 'TRANSLATION_X');
+    const translationY = getTransformBinding(node.animations, 'TRANSLATION_Y');
+    if (translationX) {
+      readFloatKeyframes(translationX, 'x');
+    }
+    if (translationY) {
+      readFloatKeyframes(translationY, 'y');
+    }
+  }
+
+  if (!hasSample) {
+    return null;
+  }
+
+  return {
+    x: endX - startX,
+    y: endY - startY,
+  };
+}
+
+function readFigmaTranslationSpan(node: MotionCapableNode): { x: number; y: number } | null {
+  return readPagxTranslationSpan(node);
+}
+
+export function motionLayoutPositionForExport(
+  node: SceneNode,
+  parent: SceneNode | null,
+): Record<string, string | number | boolean> {
+  if (!parent || !isMotionNode(node) || !hasTranslationAnimation(node)) {
+    return layoutPositionAttrs(node, parent);
+  }
+
+  const span = readPagxTranslationSpan(node);
+  if (!span) {
+    return layoutPositionAttrs(node, parent);
+  }
+
+  const bbox = nodeBoundsInParent(node, parent);
+  if (bbox && 'x' in node && 'y' in node) {
+    const shiftX = bbox.left - node.x;
+    const shiftY = bbox.top - node.y;
+    const epsilon = 1e-2;
+    if (Math.abs(shiftX - span.x) < epsilon && Math.abs(shiftY - span.y) < epsilon) {
+      return {
+        left: roundDimension(node.x),
+        top: roundDimension(node.y),
+      };
+    }
+  }
+
+  return layoutPositionAttrs(node, parent);
+}
+
+function readSetTranslationOrigin(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+): { x: number; y: number } {
+  const translationXY = getTransformBinding(node.animations, 'TRANSLATION_XY');
+  if (
+    translationXY
+    && bindingUsesSetOperation(translationXY)
+    && transformSamples.translationXY.length > 0
+  ) {
+    return {
+      x: transformSamples.translationXY[0].x,
+      y: transformSamples.translationXY[0].y,
+    };
+  }
+
+  let originX = 0;
+  let originY = 0;
+  const translationX = getTransformBinding(node.animations, 'TRANSLATION_X');
+  if (
+    translationX
+    && bindingUsesSetOperation(translationX)
+    && transformSamples.translationX.length > 0
+  ) {
+    originX = transformSamples.translationX[0].value;
+  }
+  const translationY = getTransformBinding(node.animations, 'TRANSLATION_Y');
+  if (
+    translationY
+    && bindingUsesSetOperation(translationY)
+    && transformSamples.translationY.length > 0
+  ) {
+    originY = transformSamples.translationY[0].value;
+  }
+
+  return { x: originX, y: originY };
 }
 
 function hasMotionData(node: MotionCapableNode): boolean {
@@ -235,7 +424,7 @@ function serializeAnimationsObject(animations: Animations): Record<string, unkno
   return serialized;
 }
 
-function logMotionDebugData(root: SceneNode): void {
+export function collectMotionDebugData(root: SceneNode): unknown[] {
   const entries: unknown[] = [];
 
   function walk(node: SceneNode): void {
@@ -271,7 +460,11 @@ function logMotionDebugData(root: SceneNode): void {
   }
 
   walk(root);
-  console.log('[figma-export-pagx] motion debug data:', JSON.stringify(entries, null, 2));
+  return entries;
+}
+
+function logMotionDebugData(root: SceneNode): void {
+  console.log('[figma-export-pagx] motion debug data:', JSON.stringify(collectMotionDebugData(root), null, 2));
 }
 
 function secondsToFrame(seconds: number): number {
@@ -342,35 +535,19 @@ function collectSetTrackWarnings(
   fieldName: string,
 ): void {
   for (const track of binding.tracks) {
-    if (track.keyframeOperation !== 'SET') {
+    if (track.keyframeOperation !== 'SET' && track.keyframeOperation !== 'OFFSET') {
       addDiagnostic(
         diagnostics,
         'warning',
         'MOTION_UNSUPPORTED_KEYFRAME_OP',
-        `${fieldName} 的 ${track.keyframeOperation} 轨道暂按 SET 处理`,
+        `${fieldName} 的 ${track.keyframeOperation} 轨道暂不支持`,
         nodeId,
       );
     }
   }
 }
 
-function collectFloatSamples(binding: KeyframeBinding): FloatSample[] {
-  const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
-  const samples: FloatSample[] = [{ time: 0, value: base, easing: LINEAR_EASING }];
-
-  for (const track of binding.tracks) {
-    for (const keyframe of track.keyframes) {
-      if (keyframe.value.type !== 'FLOAT') {
-        continue;
-      }
-      samples.push({
-        time: keyframe.timelinePosition,
-        value: keyframe.value.value,
-        easing: keyframe.easing,
-      });
-    }
-  }
-
+function sortAndDedupeFloatSamples(samples: FloatSample[]): FloatSample[] {
   samples.sort((left, right) => left.time - right.time);
   const deduped: FloatSample[] = [];
   for (const sample of samples) {
@@ -384,25 +561,7 @@ function collectFloatSamples(binding: KeyframeBinding): FloatSample[] {
   return deduped;
 }
 
-function collectVectorSamples(binding: KeyframeBinding): VectorSample[] {
-  const baseX = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.x : 0;
-  const baseY = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.y : 0;
-  const samples: VectorSample[] = [{ time: 0, x: baseX, y: baseY, easing: LINEAR_EASING }];
-
-  for (const track of binding.tracks) {
-    for (const keyframe of track.keyframes) {
-      if (keyframe.value.type !== 'VECTOR') {
-        continue;
-      }
-      samples.push({
-        time: keyframe.timelinePosition,
-        x: keyframe.value.value.x,
-        y: keyframe.value.value.y,
-        easing: keyframe.easing,
-      });
-    }
-  }
-
+function sortAndDedupeVectorSamples(samples: VectorSample[]): VectorSample[] {
   samples.sort((left, right) => left.time - right.time);
   const deduped: VectorSample[] = [];
   for (const sample of samples) {
@@ -414,6 +573,94 @@ function collectVectorSamples(binding: KeyframeBinding): VectorSample[] {
     }
   }
   return deduped;
+}
+
+function collectFloatSamples(binding: KeyframeBinding): FloatSample[] {
+  const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
+  const samples: FloatSample[] = [];
+  let usesSetTrack = false;
+
+  for (const track of binding.tracks) {
+    if (track.keyframeOperation === 'OFFSET') {
+      for (const keyframe of track.keyframes) {
+        if (keyframe.value.type !== 'FLOAT') {
+          continue;
+        }
+        samples.push({
+          time: keyframe.timelinePosition,
+          value: figmaRawTranslationToPagx(keyframe.value.value),
+          easing: keyframe.easing,
+        });
+      }
+      continue;
+    }
+
+    usesSetTrack = true;
+    for (const keyframe of track.keyframes) {
+      if (keyframe.value.type !== 'FLOAT') {
+        continue;
+      }
+      samples.push({
+        time: keyframe.timelinePosition,
+        value: figmaRawTranslationToPagx(keyframe.value.value),
+        easing: keyframe.easing,
+      });
+    }
+  }
+
+  if (usesSetTrack) {
+    samples.push({ time: 0, value: figmaRawTranslationToPagx(base), easing: LINEAR_EASING });
+  }
+
+  return sortAndDedupeFloatSamples(samples);
+}
+
+function collectVectorSamples(binding: KeyframeBinding): VectorSample[] {
+  const baseX = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.x : 0;
+  const baseY = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.y : 0;
+  const samples: VectorSample[] = [];
+  let usesSetTrack = false;
+
+  for (const track of binding.tracks) {
+    if (track.keyframeOperation === 'OFFSET') {
+      for (const keyframe of track.keyframes) {
+        if (keyframe.value.type !== 'VECTOR') {
+          continue;
+        }
+        samples.push({
+          time: keyframe.timelinePosition,
+          x: figmaRawTranslationToPagx(keyframe.value.value.x),
+          y: figmaRawTranslationToPagx(keyframe.value.value.y),
+          easing: keyframe.easing,
+        });
+      }
+      continue;
+    }
+
+    usesSetTrack = true;
+    for (const keyframe of track.keyframes) {
+      if (keyframe.value.type !== 'VECTOR') {
+        continue;
+      }
+      samples.push({
+        time: keyframe.timelinePosition,
+        x: figmaRawTranslationToPagx(keyframe.value.value.x),
+        y: figmaRawTranslationToPagx(keyframe.value.value.y),
+        easing: keyframe.easing,
+      });
+    }
+  }
+
+  if (usesSetTrack) {
+    samples.push({
+      time: 0,
+      x: figmaRawTranslationToPagx(baseX),
+      y: figmaRawTranslationToPagx(baseY),
+      easing: LINEAR_EASING,
+    });
+  }
+
+  return sortAndDedupeVectorSamples(samples);
 }
 
 function sampleFloatAt(samples: FloatSample[], time: number): number {
@@ -859,6 +1106,9 @@ function buildMatrixChannel(
   const sampleTimes = buildMatrixSampleTimes(transformSamples, sizeSamples, durationFrames);
   const rotationBase = transformSamples.rotation[0]?.value ?? 0;
   const rotationDirection = resolveRotationDirection(node);
+  const setTranslationOrigin = hasSetTranslationAnimation(node)
+    ? readSetTranslationOrigin(node, transformSamples)
+    : null;
 
   const keyframes: PagxKeyframe[] = [];
   for (const time of sampleTimes) {
@@ -875,6 +1125,11 @@ function buildMatrixChannel(
       if (transformSamples.translationY.length > 0) {
         translationY = sampleFloat(transformSamples.translationY, time);
       }
+    }
+
+    if (setTranslationOrigin) {
+      translationX -= setTranslationOrigin.x;
+      translationY -= setTranslationOrigin.y;
     }
 
     let scaleX = 1;
@@ -1009,6 +1264,50 @@ export function springProgressForTest(progress: number, bounce: number): number 
 
 export function sampleFloatAtEasedForTest(samples: FloatSample[], time: number): number {
   return sampleFloatAtEased(samples, time);
+}
+
+export function collectFloatSamplesForTest(binding: KeyframeBinding): FloatSample[] {
+  return collectFloatSamples(binding);
+}
+
+export function readFigmaTranslationSpanForTest(node: MotionCapableNode): { x: number; y: number } | null {
+  return readPagxTranslationSpan(node);
+}
+
+export function resolveMatrixTranslationForTest(
+  node: MotionCapableNode,
+  transformSamples: ReturnType<typeof readTransformSamples>,
+  time: number,
+): { x: number; y: number } {
+  let translationX = 0;
+  let translationY = 0;
+  if (transformSamples.translationXY.length > 0) {
+    const vector = sampleVectorAt(transformSamples.translationXY, time);
+    translationX = vector.x;
+    translationY = vector.y;
+  } else {
+    if (transformSamples.translationX.length > 0) {
+      translationX = sampleFloatAt(transformSamples.translationX, time);
+    }
+    if (transformSamples.translationY.length > 0) {
+      translationY = sampleFloatAt(transformSamples.translationY, time);
+    }
+  }
+
+  if (hasSetTranslationAnimation(node)) {
+    const origin = readSetTranslationOrigin(node, transformSamples);
+    translationX -= origin.x;
+    translationY -= origin.y;
+  }
+
+  return { x: translationX, y: translationY };
+}
+
+export function readTransformSamplesForTest(
+  node: MotionCapableNode,
+  diagnostics: Diagnostic[] = [],
+): ReturnType<typeof readTransformSamples> {
+  return readTransformSamples(node, diagnostics);
 }
 
 export function collectMotionAnimations(

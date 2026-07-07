@@ -25,7 +25,7 @@ import {
   strokesToElements,
 } from './figma-reader';
 import { shapeElementFromPathData } from './path-detect';
-import { collectMotionAnimations, isMotionNode, motionLayoutSizeForExport } from './figma-motion';
+import { collectMotionAnimations, isMotionNode, motionLayoutPositionForExport, motionLayoutSizeForExport } from './figma-motion';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,
@@ -150,7 +150,7 @@ function applyTextPosition(
     return;
   }
 
-  Object.assign(textElement.attrs, layoutPositionAttrs(node, parent));
+  Object.assign(textElement.attrs, motionLayoutPositionForExport(node, parent));
 }
 
 async function mapTextNode(
@@ -210,7 +210,7 @@ function resolvedNodeSize(node: SceneNode): { width: number; height: number } | 
 
 function layerBaseAttrs(node: SceneNode, parent: SceneNode | null): Record<string, string | number | boolean> {
   const attrs: Record<string, string | number | boolean> = {
-    ...layoutPositionAttrs(node, parent),
+    ...motionLayoutPositionForExport(node, parent),
   };
 
   const matrix = nodeMatrixInParent(node, parent);

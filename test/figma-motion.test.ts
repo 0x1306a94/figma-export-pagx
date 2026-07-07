@@ -1,10 +1,115 @@
 import assert from 'node:assert/strict';
 import {
   applyRotationDirectionForTest,
+  collectFloatSamplesForTest,
+  readFigmaTranslationSpanForTest,
+  readTransformSamplesForTest,
+  resolveMatrixTranslationForTest,
   sampleFloatAtEasedForTest,
   springProgressForTest,
 } from '../src/export/figma-motion';
 import { pagxMotionMatrixStringFromComponents } from '../src/export/figma-reader';
+
+const LINEAR_EASING = { type: 'LINEAR' as const };
+
+function testOffsetTranslationSamplesNegateKeyframe(): void {
+  const binding = {
+    timelineDuration: 2,
+    baseValue: { type: 'FLOAT' as const, value: 789 },
+    tracks: [{
+      keyframeOperation: 'OFFSET' as const,
+      keyframes: [
+        { timelinePosition: 0, value: { type: 'FLOAT' as const, value: -200 }, easing: LINEAR_EASING },
+        { timelinePosition: 0.5, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+      ],
+    }],
+  };
+
+  const samples = collectFloatSamplesForTest(binding);
+  assert.equal(samples.length, 2);
+  assert.equal(samples[0].time, 0);
+  assert.equal(samples[0].value, 200);
+  assert.equal(samples[1].time, 0.5);
+  assert.equal(samples[1].value, 0);
+}
+
+function testOffsetTranslationRightDirection(): void {
+  const binding = {
+    timelineDuration: 2,
+    baseValue: { type: 'FLOAT' as const, value: 789 },
+    tracks: [{
+      keyframeOperation: 'OFFSET' as const,
+      keyframes: [
+        { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 200 }, easing: LINEAR_EASING },
+        { timelinePosition: 0.5, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+      ],
+    }],
+  };
+
+  const samples = collectFloatSamplesForTest(binding);
+  assert.equal(samples[0].value, -200);
+  assert.equal(samples[1].value, 0);
+}
+
+function testSetTranslationSamplesKeepAbsoluteValues(): void {
+  const binding = {
+    timelineDuration: 2,
+    baseValue: { type: 'FLOAT' as const, value: 0 },
+    tracks: [{
+      keyframeOperation: 'SET' as const,
+      keyframes: [
+        { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+        { timelinePosition: 0.599, value: { type: 'FLOAT' as const, value: -423 }, easing: LINEAR_EASING },
+      ],
+    }],
+  };
+
+  const samples = collectFloatSamplesForTest(binding);
+  assert.equal(samples[0].time, 0);
+  assert.equal(samples[0].value, 0);
+  assert.equal(samples[1].time, 0.599);
+  assert.equal(samples[1].value, 423);
+}
+
+function testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin(): void {
+  const node = {
+    id: '225:103',
+    animations: {
+      TRANSLATION_XY: {
+        timelineDuration: 2,
+        baseValue: { type: 'VECTOR' as const, value: { x: 0, y: 0 } },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            {
+              timelinePosition: 0,
+              value: { type: 'VECTOR' as const, value: { x: 0, y: 0 } },
+              easing: LINEAR_EASING,
+            },
+            {
+              timelinePosition: 0.496,
+              value: { type: 'VECTOR' as const, value: { x: -453, y: 76 } },
+              easing: LINEAR_EASING,
+            },
+          ],
+        }],
+      },
+    },
+  } as Parameters<typeof readTransformSamplesForTest>[0];
+
+  const span = readFigmaTranslationSpanForTest(node);
+  assert.deepEqual(span, { x: 453, y: -76 });
+
+  const transformSamples = readTransformSamplesForTest(node);
+  assert.deepEqual(
+    resolveMatrixTranslationForTest(node, transformSamples, 0),
+    { x: 0, y: 0 },
+  );
+  assert.deepEqual(
+    resolveMatrixTranslationForTest(node, transformSamples, 0.496),
+    { x: 453, y: -76 },
+  );
+}
 
 function testSpringOvershoot(): void {
   const bounce = 0.402;
@@ -70,6 +175,10 @@ function run(): void {
   testRotationDirectionClockwise();
   testPivotMatrixAtClockwise90();
   testPivotMatrixAtMinus90();
+  testOffsetTranslationSamplesNegateKeyframe();
+  testOffsetTranslationRightDirection();
+  testSetTranslationSamplesKeepAbsoluteValues();
+  testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin();
   console.log('figma-motion tests passed');
 }
 

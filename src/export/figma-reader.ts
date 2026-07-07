@@ -389,7 +389,7 @@ function isZeroTranslation(tx: number, ty: number): boolean {
   return Math.abs(tx) < epsilon && Math.abs(ty) < epsilon;
 }
 
-function nodeBoundsInParent(
+export function nodeBoundsInParent(
   node: SceneNode,
   parent: SceneNode,
 ): { left: number; top: number } | null {
