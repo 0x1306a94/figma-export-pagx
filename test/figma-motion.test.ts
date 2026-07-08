@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   applyRotationDirectionForTest,
   buildMatrixChannelForTest,
+  collectMotionAnimations,
   collectFloatSamplesForTest,
   composeMotionMatrixForTest,
   readFigmaTranslationSpanForTest,
@@ -18,6 +19,7 @@ import {
 import { pagxMotionMatrixStringFromComponents } from '../src/export/figma-reader';
 
 const LINEAR_EASING = { type: 'LINEAR' as const };
+const EASE_OUT = { type: 'EASE_OUT' as const };
 
 const frame4Parent = {
   width: 400,
@@ -575,6 +577,115 @@ function testGroupChildSlideInLeftKeepsRawOffset(): void {
   assert.equal(samples[1].value, 0);
 }
 
+function testMotionGroupSizeAnimationKeepsEasing(): void {
+  const rectangle = {
+    id: '1:24',
+    type: 'RECTANGLE',
+    x: 20,
+    y: 30,
+    width: 100,
+    height: 80,
+    animations: {
+      ROTATION: {
+        timelineDuration: 1,
+        baseValue: { type: 'FLOAT' as const, value: 0 },
+        tracks: [{
+          keyframeOperation: 'OFFSET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+            { timelinePosition: 1, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+      WIDTH: {
+        timelineDuration: 1,
+        baseValue: { type: 'FLOAT' as const, value: 100 },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 100 }, easing: EASE_OUT },
+            { timelinePosition: 1, value: { type: 'FLOAT' as const, value: 200 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [],
+    timelines: [],
+  } as unknown as SceneNode;
+
+  const root = {
+    id: '1:75',
+    type: 'FRAME',
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 1 }],
+    children: [rectangle],
+  } as unknown as SceneNode;
+
+  const animations = collectMotionAnimations(
+    root,
+    new Map([[rectangle.id, 'layer_1_24']]),
+    new Map([[rectangle.id, 'motion_group_1_24']]),
+    [],
+  );
+  const motionObject = animations[0].objects.find((item) => item.target === 'motion_group_1_24');
+  const scaleX = motionObject?.channels.find((channel) => channel.name === 'scale.x');
+
+  assert(scaleX, 'motion group should export width animation as scale.x');
+  assert.equal(scaleX.keyframes[0].interpolation, 'bezier');
+  assert.equal(scaleX.keyframes[0].bezierOut, '0,0');
+  assert.equal(scaleX.keyframes[0].bezierIn, '0.58,1');
+}
+
+function testSizeOnlyMatrixAnimationKeepsEasing(): void {
+  const node = {
+    id: '8:6',
+    type: 'RECTANGLE',
+    x: 1130,
+    y: 192,
+    width: 390,
+    height: 355,
+    animations: {
+      WIDTH: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 240 },
+        tracks: [{
+          keyframeOperation: 'OFFSET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: EASE_OUT },
+            { timelinePosition: 0.5, value: { type: 'FLOAT' as const, value: 150 }, easing: EASE_OUT },
+          ],
+        }],
+      },
+      HEIGHT: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 205 },
+        tracks: [{
+          keyframeOperation: 'OFFSET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: EASE_OUT },
+            { timelinePosition: 0.5, value: { type: 'FLOAT' as const, value: 150 }, easing: EASE_OUT },
+          ],
+        }],
+      },
+    },
+    animationStyles: [{
+      name: 'motion.preset_name.size',
+      props: { type: 'resize_out' },
+    }],
+    timelines: [{ duration: 2 }],
+  } as Parameters<typeof buildMatrixChannelForTest>[0];
+
+  const matrixChannel = buildMatrixChannelForTest(node);
+
+  assert(matrixChannel, 'size-only animation should export matrix channel');
+  assert.equal(matrixChannel.keyframes[0].value, '1,0,0,1,0,0');
+  assert.equal(matrixChannel.keyframes[1].value, '1.63,0,0,1.73,0,0');
+  assert.equal(matrixChannel.keyframes[0].interpolation, 'bezier');
+  assert.equal(matrixChannel.keyframes[0].bezierOut, '0,0');
+  assert.equal(matrixChannel.keyframes[0].bezierIn, '0.58,1');
+}
+
 function run(): void {
   testSpringOvershoot();
   testRotationSamplingUsesSpring();
@@ -602,6 +713,8 @@ function run(): void {
   testComposeMatrixFollowsAnimationStyleOrder();
   testSetTranslationSamplesKeepAbsoluteValues();
   testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin();
+  testMotionGroupSizeAnimationKeepsEasing();
+  testSizeOnlyMatrixAnimationKeepsEasing();
   console.log('figma-motion tests passed');
 }
 

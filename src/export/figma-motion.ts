@@ -882,6 +882,40 @@ function collectFloatSamples(
   return sortAndDedupeFloatSamples(samples);
 }
 
+function resolveSizeKeyframeValue(
+  base: number,
+  rawValue: number,
+  operation: 'SET' | 'OFFSET' | 'SCALE',
+): number {
+  if (operation === 'OFFSET') {
+    return base + rawValue;
+  }
+  if (operation === 'SCALE') {
+    return base * rawValue;
+  }
+  return rawValue;
+}
+
+function collectSizeSamples(binding: KeyframeBinding): FloatSample[] {
+  const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
+  const samples: FloatSample[] = [];
+
+  for (const track of binding.tracks) {
+    for (const keyframe of track.keyframes) {
+      if (keyframe.value.type !== 'FLOAT') {
+        continue;
+      }
+      samples.push({
+        time: keyframe.timelinePosition,
+        value: resolveSizeKeyframeValue(base, keyframe.value.value, track.keyframeOperation),
+        easing: keyframe.easing,
+      });
+    }
+  }
+
+  return sortAndDedupeFloatSamples(samples);
+}
+
 function collectVectorSamples(
   binding: KeyframeBinding,
   node?: SceneNode,
@@ -1199,8 +1233,8 @@ function readSizeSamples(node: MotionCapableNode, diagnostics: Diagnostic[]): {
     collectSetTrackWarnings(heightBinding, diagnostics, node.id, 'HEIGHT');
   }
 
-  const width = widthBinding ? collectFloatSamples(widthBinding) : [];
-  const height = heightBinding ? collectFloatSamples(heightBinding) : [];
+  const width = widthBinding ? collectSizeSamples(widthBinding) : [];
+  const height = heightBinding ? collectSizeSamples(heightBinding) : [];
   const baseWidth = widthBinding?.baseValue.type === 'FLOAT'
     ? widthBinding.baseValue.value
     : (width[0]?.value ?? ('width' in node ? node.width : 1));
@@ -1658,15 +1692,15 @@ function matrixKeyframeEasingAtTime(
   sizeSamples: ReturnType<typeof readSizeSamples>,
   time: number,
 ): MotionEasing | VariableAlias | null {
-  return findSampleEasingAtTime(transformSamples.translationXY, time)
-    ?? findSampleEasingAtTime(transformSamples.translationX, time)
-    ?? findSampleEasingAtTime(transformSamples.translationY, time)
-    ?? findSampleEasingAtTime(transformSamples.rotation, time)
-    ?? findSampleEasingAtTime(transformSamples.scaleXY, time)
-    ?? findSampleEasingAtTime(transformSamples.scaleX, time)
-    ?? findSampleEasingAtTime(transformSamples.scaleY, time)
-    ?? findSampleEasingAtTime(sizeSamples.width, time)
-    ?? findSampleEasingAtTime(sizeSamples.height, time);
+  return (isAnimatedVector(transformSamples.translationXY) ? findSampleEasingAtTime(transformSamples.translationXY, time) : null)
+    ?? (isAnimatedFloat(transformSamples.translationX) ? findSampleEasingAtTime(transformSamples.translationX, time) : null)
+    ?? (isAnimatedFloat(transformSamples.translationY) ? findSampleEasingAtTime(transformSamples.translationY, time) : null)
+    ?? (isAnimatedFloat(transformSamples.rotation) ? findSampleEasingAtTime(transformSamples.rotation, time) : null)
+    ?? (isAnimatedVector(transformSamples.scaleXY) ? findSampleEasingAtTime(transformSamples.scaleXY, time) : null)
+    ?? (isAnimatedFloat(transformSamples.scaleX) ? findSampleEasingAtTime(transformSamples.scaleX, time) : null)
+    ?? (isAnimatedFloat(transformSamples.scaleY) ? findSampleEasingAtTime(transformSamples.scaleY, time) : null)
+    ?? (isAnimatedFloat(sizeSamples.width) ? findSampleEasingAtTime(sizeSamples.width, time) : null)
+    ?? (isAnimatedFloat(sizeSamples.height) ? findSampleEasingAtTime(sizeSamples.height, time) : null);
 }
 
 function buildMatrixChannel(
@@ -1836,6 +1870,39 @@ function buildFloatSamplesChannel(
   };
 }
 
+function buildSizeScaleChannels(
+  samples: ReturnType<typeof readSizeSamples>,
+  nodeId: string,
+  diagnostics: Diagnostic[],
+): PagxChannel[] {
+  const channels: PagxChannel[] = [];
+  if (samples.baseWidth > 0) {
+    const scaleX = buildFloatSamplesChannel(
+      'scale.x',
+      samples.width,
+      nodeId,
+      diagnostics,
+      (value) => value / samples.baseWidth,
+    );
+    if (scaleX) {
+      channels.push(scaleX);
+    }
+  }
+  if (samples.baseHeight > 0) {
+    const scaleY = buildFloatSamplesChannel(
+      'scale.y',
+      samples.height,
+      nodeId,
+      diagnostics,
+      (value) => value / samples.baseHeight,
+    );
+    if (scaleY) {
+      channels.push(scaleY);
+    }
+  }
+  return channels;
+}
+
 function buildGroupTransformChannels(
   node: MotionCapableNode,
   parent: SceneNode | null,
@@ -1952,6 +2019,12 @@ function buildGroupTransformChannels(
     const scaleY = buildFloatSamplesChannel('scale.y', transformSamples.scaleY, node.id, diagnostics, (value) => value);
     if (scaleY) {
       channels.push(scaleY);
+    }
+  }
+
+  for (const channel of buildSizeScaleChannels(sizeSamples, node.id, diagnostics)) {
+    if (!channels.some((item) => item.name === channel.name)) {
+      channels.push(channel);
     }
   }
 
