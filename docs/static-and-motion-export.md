@@ -1,6 +1,6 @@
 # PAGX 静态与 Motion 动画导出说明
 
-本文记录当前 Figma 到 PAGX 导出的静态布局、旋转、翻转、Motion 动画和调试规则。示例可参考 `test_dev_export_samples/Frame7-no-rotation.pagx`、`test_dev_export_samples/Frame7-rotation.pagx`、`test_dev_export_samples/Frame4.pagx`、`test_dev_export_samples/Frame6.pagx`。
+本文记录当前 Figma 到 PAGX 导出的静态布局、旋转、翻转、Motion 动画和调试规则。示例可参考 `test_dev_export_samples/Frame7-no-rotation.pagx`、`test_dev_export_samples/Frame7-rotation.pagx`、`test_dev_export_samples/Frame4.pagx`、`test_dev_export_samples/Frame6.pagx`、`test_dev_export_samples/Frame8.pagx`。
 
 ## 目标
 
@@ -105,6 +105,7 @@ PAGX 动画基础参数：
 | `TRANSLATION_X/Y/XY` | 内部 Group    | `position.x` / `position.y` |
 | `ROTATION`           | 内部 Group    | `rotation`                  |
 | `SCALE_X/Y/XY`       | 内部 Group    | `scale.x` / `scale.y`       |
+| `WIDTH` / `HEIGHT`   | 内部 Group    | `scale.x` / `scale.y`       |
 | 不适合 Group 的 fallback | 原 Layer     | `matrix`                    |
 
 
@@ -179,7 +180,7 @@ Figma Motion 的平移有两类：
 | 类型       | 含义                       | PAGX 处理                               |
 | -------- | ------------------------ | ------------------------------------- |
 | `OFFSET` | 相对静止位置的偏移，常见于内置 preset   | 按 Figma offset 和方向规则转成 Group position |
-| `SET`    | 手动 keyframe 的绝对 Motion 值 | 相对首个 SET 关键帧求增量                       |
+| `SET`    | 手动 keyframe 的绝对 Motion 值 | 保留 Figma 原始 X/Y 方向，再相对首个 SET 关键帧求增量  |
 
 
 写入 Group 时，位置通道以 Group 初始中心为基准：
@@ -190,6 +191,8 @@ position.y = height / 2 + translationY - setOriginY
 ```
 
 其中 `setOriginX/Y` 只用于 SET 手动 keyframe，让第一帧保持静态状态。
+
+注意：`SET` translation 不做 X/Y 取反。之前 Frame4 的父级 pure flip 场景只应影响 `OFFSET` preset 的方向判断，不能套用到 Frame8 这类手动 keyframe；否则 `Rectangle28` 会出现位移方向反掉。
 
 ### X/Y 翻转方向
 
@@ -226,6 +229,28 @@ Group 的 `rotation` 通道使用角度标量，并保留 easing。
 ### 缩放动画
 
 `SCALE_X`、`SCALE_Y`、`SCALE_XY` 会写入 Group 的 `scale.x`、`scale.y`。
+
+`WIDTH` / `HEIGHT` size 动画也会折算为 Group 的 `scale.x` / `scale.y`。size keyframe 的数值规则是：
+
+| operation | 处理方式 |
+| --------- | -------- |
+| `SET`     | 使用 keyframe 原始尺寸 |
+| `OFFSET`  | `baseValue + keyframeValue` |
+| `SCALE`   | `baseValue * keyframeValue` |
+
+这样可以保持 Frame6 中 Rectangle24 的放大尺寸和 easing 与 Figma Motion 一致。
+
+### Timeline Offset
+
+Figma `animationStyles[*].timelineOffset` 会叠加到对应字段的 keyframe 时间上：
+
+- `OPACITY` 匹配 opacity / fadeIn / fadeOut。
+- `TRANSLATION_X/Y/XY` 匹配 position / slide preset。
+- `ROTATION` 匹配 rotation / rotateIn / rotateOut / custom。
+- `SCALE_X/Y/XY` 匹配 scale preset。
+- `WIDTH` / `HEIGHT` 匹配 size / resize preset。
+
+例如 Frame8 的 `Rectangle27` opacity keyframe 本身是 `0s -> 0.41s`，style offset 是 `1.09s`，导出到 60fps 后应是 `65 -> 90` 帧。
 
 
 
@@ -317,7 +342,17 @@ Motion debug JSON 保留，不要删除。
 预期：
 
 - `SCALE` operation 不再被误报为不支持。
+- `WIDTH` / `HEIGHT` size 动画按 operation 转成正确尺寸，再输出为 Group scale。
+- size 动画的 easing 会同步到导出的 keyframe。
 - 没有有效动画数据的节点不会生成空动画对象。
+
+### Frame8
+
+预期：
+
+- `Rectangle28` 手动 `SET` translation 保留 Figma Animated SVG 的原始方向，不受 Frame4 父级 flip 补偿影响。
+- `Rectangle28` 手动 `SET` rotation 仍相对首帧求增量，并按 PAGX 角度方向转换。
+- `Rectangle27` opacity 使用 `animationStyles.timelineOffset`，避免淡出提前到时间线起点。
 
 
 
@@ -329,6 +364,8 @@ Motion debug JSON 保留，不要删除。
 | 静态节点整体 X/Y flip      | 检查未旋转 Layer 是否错误写了 matrix                                     |
 | 静态旋转方向反了             | 检查 `nodeMatrixInParent()` 的相对父级 transform 和 `b/c` 符号          |
 | Motion 平移方向反了        | 检查 OFFSET 的 X 轴取反规则、父级 pure flip 判断                           |
+| 手动 keyframe 平移方向反了   | 检查 SET translation 是否错误复用了 OFFSET 的取反逻辑                         |
+| 动画过早/过晚开始            | 检查 `animationStyles.timelineOffset` 是否叠加到 keyframe 时间              |
 | 旋转不是绕自身中心            | 检查是否生成内部 Group，且 `anchor` / `position` 是否为 `width/2,height/2` |
 | 旋转像左右摇摆              | 检查是否 fallback 到 matrix 线性插值；应优先使用 Group `rotation`            |
 | 文件里有空 `<Animations>` | `collectMotionAnimations()` 应返回 `[]`，writer 会跳过输出             |
@@ -369,6 +406,8 @@ npm test
 ```bash
 npm run build
 build_libpag/pagx verify test_dev_export_samples/Frame4.pagx --render
+build_libpag/pagx verify test_dev_export_samples/Frame6.pagx --render
+build_libpag/pagx verify test_dev_export_samples/Frame8.pagx --render
 build_libpag/pagx verify test_dev_export_samples/Frame7-rotation.pagx --render
 ```
 
