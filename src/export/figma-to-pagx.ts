@@ -25,7 +25,7 @@ import {
   strokesToElements,
 } from './figma-reader';
 import { shapeElementFromPathData } from './path-detect';
-import { collectMotionAnimations, isMotionNode, motionLayoutPositionForExport, motionLayoutSizeForExport } from './figma-motion';
+import { motionLayoutPositionForExport, motionLayoutSizeForExport } from './figma-motion';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,
@@ -34,8 +34,68 @@ function omitLayoutSize(
   return rest;
 }
 
+function isPureAxisFlipMatrix(matrix: string): boolean {
+  const [a, b, c, d] = matrix.split(',').map(Number);
+  const epsilon = 1e-4;
+  return Math.abs(a + 1) < epsilon
+    && Math.abs(d + 1) < epsilon
+    && Math.abs(b) < epsilon
+    && Math.abs(c) < epsilon;
+}
+
+function parentHasPureAxisFlip(parent: SceneNode | null): boolean {
+  if (!parent || !('absoluteTransform' in parent)) {
+    return false;
+  }
+
+  const transform = parent.absoluteTransform;
+  const epsilon = 1e-4;
+  return Math.abs(transform[0][0] + 1) < epsilon
+    && Math.abs(transform[1][1] + 1) < epsilon
+    && Math.abs(transform[1][0]) < epsilon
+    && Math.abs(transform[0][1]) < epsilon;
+}
+
+function matrixFromAbsoluteBounds(node: SceneNode, parent: SceneNode): string | undefined {
+  if (
+    !('absoluteTransform' in node)
+    || !('absoluteBoundingBox' in node)
+    || !node.absoluteBoundingBox
+    || !('absoluteBoundingBox' in parent)
+    || !parent.absoluteBoundingBox
+  ) {
+    return undefined;
+  }
+
+  const transform = node.absoluteTransform;
+  const left = node.absoluteBoundingBox.x - parent.absoluteBoundingBox.x;
+  const top = node.absoluteBoundingBox.y - parent.absoluteBoundingBox.y;
+  const tx = transform[0][2] - parent.absoluteBoundingBox.x - left;
+  const ty = transform[1][2] - parent.absoluteBoundingBox.y - top;
+
+  return [
+    roundDimension(transform[0][0]),
+    roundDimension(transform[1][0]),
+    roundDimension(transform[0][1]),
+    roundDimension(transform[1][1]),
+    roundDimension(tx),
+    roundDimension(ty),
+  ].join(',');
+}
+
+function staticLayerMatrixInParent(node: SceneNode, parent: SceneNode | null): string | undefined {
+  const matrix = nodeMatrixInParent(node, parent);
+  if (!matrix || isPureAxisFlipMatrix(matrix)) {
+    return undefined;
+  }
+  if (parentHasPureAxisFlip(parent)) {
+    return parent ? matrixFromAbsoluteBounds(node, parent) : matrix;
+  }
+  return matrix;
+}
+
 export function textUsesLayerTransform(node: TextNode, parent: SceneNode | null): boolean {
-  if (nodeMatrixInParent(node, parent)) {
+  if (staticLayerMatrixInParent(node, parent)) {
     return true;
   }
 
@@ -213,7 +273,7 @@ function layerBaseAttrs(node: SceneNode, parent: SceneNode | null): Record<strin
     ...motionLayoutPositionForExport(node, parent),
   };
 
-  const matrix = nodeMatrixInParent(node, parent);
+  const matrix = staticLayerMatrixInParent(node, parent);
   if (matrix) {
     attrs.matrix = matrix;
   }
@@ -552,15 +612,11 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
     addDiagnostic(ctx.diagnostics, 'error', 'UNSUPPORTED_ROOT', `不支持的 root 节点类型 ${root.type}`, root.id);
   }
 
-  const animations = isMotionNode(root)
-    ? collectMotionAnimations(root, ctx.layerIdByFigmaId, ctx.diagnostics)
-    : [];
-
   return {
     width,
     height,
     resources: ctx.resources,
-    animations,
+    animations: [],
     layers,
     customData: {
       'data-exported-by': 'figma-export-pagx',

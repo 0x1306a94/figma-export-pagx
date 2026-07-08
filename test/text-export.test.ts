@@ -37,18 +37,19 @@ const rotatedText = mockNode({
   absoluteBoundingBox: { x: 300, y: 300, width: 40, height: 120 },
   width: 120,
   height: 40,
+  rotation: 90,
 }) as TextNode;
 
 assert(!textUsesLayerTransform(simpleText, parent), 'simple text should not use layer transform');
-assert(textUsesLayerTransform(rotatedText, parent), 'rotated text should use layer transform');
+assert(textUsesLayerTransform(rotatedText, parent), 'static rotated text should use layer transform');
 
 const simpleLayerAttrs = textLayerAttrs(simpleText, parent);
 assert(simpleLayerAttrs.left === undefined, 'simple text layer should not set left');
 assert(simpleLayerAttrs.width === undefined, 'simple text layer should not set width');
 
 const rotatedLayerAttrs = textLayerAttrs(rotatedText, parent);
-assert(rotatedLayerAttrs.left === 200, 'rotated text layer should keep layout left');
-assert(rotatedLayerAttrs.matrix !== undefined, 'rotated text layer should keep matrix');
+assert(rotatedLayerAttrs.left === 200, 'static rotated text layer should keep layout left');
+assert(rotatedLayerAttrs.matrix !== undefined, 'static rotated text layer should keep matrix');
 assert(rotatedLayerAttrs.width === undefined, 'rotated text layer should not set width');
 
 const autoLayoutParent = mockNode({
