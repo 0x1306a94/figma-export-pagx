@@ -168,6 +168,7 @@ const SIZE_FIELDS = ['WIDTH', 'HEIGHT'] as const;
 
 type TransformField = typeof TRANSFORM_FIELDS[number];
 type SizeField = typeof SIZE_FIELDS[number];
+type MotionField = TransformField | SizeField | 'OPACITY';
 
 type FloatSample = {
   time: number;
@@ -364,9 +365,6 @@ function resolveFloatKeyframeValue(
       translationContext.parent,
     );
   }
-  if (operation === 'SET') {
-    return figmaRawTranslationToPagx(rawValue);
-  }
   return rawValue;
 }
 
@@ -381,6 +379,38 @@ function figmaOffsetValueToPagx(
     : (value || 0);
 }
 
+function styleMatchesMotionField(style: AppliedAnimationStyle, field: MotionField): boolean {
+  const name = style.name ?? '';
+  const type = typeof style.props?.type === 'string' ? style.props.type : '';
+
+  switch (field) {
+    case 'OPACITY':
+      return name.includes('opacity') || type === 'fadeIn' || type === 'fadeOut';
+    case 'TRANSLATION_X':
+    case 'TRANSLATION_Y':
+    case 'TRANSLATION_XY':
+      return name.includes('position') || type.startsWith('slide_');
+    case 'ROTATION':
+      return isRotationStyle(style);
+    case 'SCALE_X':
+    case 'SCALE_Y':
+    case 'SCALE_XY':
+      return name.includes('scale') || type === 'scaleIn' || type === 'scaleOut';
+    case 'WIDTH':
+    case 'HEIGHT':
+      return name.includes('size') || type === 'resizeIn' || type === 'resizeOut';
+  }
+}
+
+function motionStyleTimelineOffset(node: MotionCapableNode, field: MotionField): number {
+  for (const style of node.animationStyles ?? []) {
+    if (styleMatchesMotionField(style, field) && typeof style.timelineOffset === 'number') {
+      return style.timelineOffset;
+    }
+  }
+  return 0;
+}
+
 function translationKeyframeValueToPagx(
   value: number,
   axis: 'x' | 'y',
@@ -391,7 +421,7 @@ function translationKeyframeValueToPagx(
   if (operation === 'OFFSET') {
     return figmaOffsetValueToPagx(value, axis, node, parent);
   }
-  return figmaRawTranslationToPagx(value);
+  return value;
 }
 
 function readPagxTranslationSpan(
@@ -824,6 +854,7 @@ type TranslationSampleContext = {
 function collectFloatSamples(
   binding: KeyframeBinding,
   translationContext?: TranslationSampleContext,
+  timeOffset = 0,
 ): FloatSample[] {
   const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
   const samples: FloatSample[] = [];
@@ -836,7 +867,7 @@ function collectFloatSamples(
           continue;
         }
         samples.push({
-          time: keyframe.timelinePosition,
+          time: keyframe.timelinePosition + timeOffset,
           value: resolveFloatKeyframeValue(
             keyframe.value.value,
             track.keyframeOperation,
@@ -857,7 +888,7 @@ function collectFloatSamples(
         continue;
       }
       samples.push({
-        time: keyframe.timelinePosition,
+        time: keyframe.timelinePosition + timeOffset,
         value: resolveFloatKeyframeValue(
           keyframe.value.value,
           track.keyframeOperation,
@@ -869,10 +900,10 @@ function collectFloatSamples(
   }
 
   if (usesSetKeyframeTrack) {
-    const hasKeyframeAtZero = samples.some((sample) => Math.abs(sample.time) < 1e-6);
-    if (!hasKeyframeAtZero) {
+    const hasKeyframeAtOffset = samples.some((sample) => Math.abs(sample.time - timeOffset) < 1e-6);
+    if (!hasKeyframeAtOffset) {
       samples.push({
-        time: 0,
+        time: timeOffset,
         value: resolveFloatKeyframeValue(base, 'SET', translationContext),
         easing: LINEAR_EASING,
       });
@@ -896,7 +927,7 @@ function resolveSizeKeyframeValue(
   return rawValue;
 }
 
-function collectSizeSamples(binding: KeyframeBinding): FloatSample[] {
+function collectSizeSamples(binding: KeyframeBinding, timeOffset = 0): FloatSample[] {
   const base = binding.baseValue.type === 'FLOAT' ? binding.baseValue.value : 0;
   const samples: FloatSample[] = [];
 
@@ -906,7 +937,7 @@ function collectSizeSamples(binding: KeyframeBinding): FloatSample[] {
         continue;
       }
       samples.push({
-        time: keyframe.timelinePosition,
+        time: keyframe.timelinePosition + timeOffset,
         value: resolveSizeKeyframeValue(base, keyframe.value.value, track.keyframeOperation),
         easing: keyframe.easing,
       });
@@ -920,6 +951,7 @@ function collectVectorSamples(
   binding: KeyframeBinding,
   node?: SceneNode,
   parent?: SceneNode | null,
+  timeOffset = 0,
 ): VectorSample[] {
   const baseX = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.x : 0;
   const baseY = binding.baseValue.type === 'VECTOR' ? binding.baseValue.value.y : 0;
@@ -933,7 +965,7 @@ function collectVectorSamples(
           continue;
         }
         samples.push({
-          time: keyframe.timelinePosition,
+          time: keyframe.timelinePosition + timeOffset,
           x: node
             ? figmaOffsetValueToPagx(keyframe.value.value.x, 'x', node, parent ?? null)
             : figmaRawTranslationToPagx(keyframe.value.value.x),
@@ -952,21 +984,24 @@ function collectVectorSamples(
         continue;
       }
       samples.push({
-        time: keyframe.timelinePosition,
-        x: figmaRawTranslationToPagx(keyframe.value.value.x),
-        y: figmaRawTranslationToPagx(keyframe.value.value.y),
+        time: keyframe.timelinePosition + timeOffset,
+        x: keyframe.value.value.x,
+        y: keyframe.value.value.y,
         easing: keyframe.easing,
       });
     }
   }
 
   if (usesSetTrack) {
-    samples.push({
-      time: 0,
-      x: figmaRawTranslationToPagx(baseX),
-      y: figmaRawTranslationToPagx(baseY),
-      easing: LINEAR_EASING,
-    });
+    const hasKeyframeAtOffset = samples.some((sample) => Math.abs(sample.time - timeOffset) < 1e-6);
+    if (!hasKeyframeAtOffset) {
+      samples.push({
+        time: timeOffset,
+        x: baseX,
+        y: baseY,
+        easing: LINEAR_EASING,
+      });
+    }
   }
 
   return sortAndDedupeVectorSamples(samples);
@@ -1183,9 +1218,10 @@ function buildFloatChannel(
   fieldName: string,
   channelName: string,
   diagnostics: Diagnostic[],
+  timeOffset = 0,
 ): PagxChannel | null {
   collectSetTrackWarnings(binding, diagnostics, nodeId, fieldName);
-  const samples = collectFloatSamples(binding);
+  const samples = collectFloatSamples(binding, undefined, timeOffset);
   if (!isAnimatedFloat(samples)) {
     return null;
   }
@@ -1213,7 +1249,14 @@ function buildAlphaChannel(
   if (!binding) {
     return null;
   }
-  return buildFloatChannel(binding, node.id, 'OPACITY', 'alpha', diagnostics);
+  return buildFloatChannel(
+    binding,
+    node.id,
+    'OPACITY',
+    'alpha',
+    diagnostics,
+    motionStyleTimelineOffset(node, 'OPACITY'),
+  );
 }
 
 function readSizeSamples(node: MotionCapableNode, diagnostics: Diagnostic[]): {
@@ -1233,8 +1276,8 @@ function readSizeSamples(node: MotionCapableNode, diagnostics: Diagnostic[]): {
     collectSetTrackWarnings(heightBinding, diagnostics, node.id, 'HEIGHT');
   }
 
-  const width = widthBinding ? collectSizeSamples(widthBinding) : [];
-  const height = heightBinding ? collectSizeSamples(heightBinding) : [];
+  const width = widthBinding ? collectSizeSamples(widthBinding, motionStyleTimelineOffset(node, 'WIDTH')) : [];
+  const height = heightBinding ? collectSizeSamples(heightBinding, motionStyleTimelineOffset(node, 'HEIGHT')) : [];
   const baseWidth = widthBinding?.baseValue.type === 'FLOAT'
     ? widthBinding.baseValue.value
     : (width[0]?.value ?? ('width' in node ? node.width : 1));
@@ -1342,18 +1385,34 @@ function readTransformSamples(
   }
 
   const translationX = bindings.TRANSLATION_X
-    ? collectFloatSamples(bindings.TRANSLATION_X, { axis: 'x', node, parent })
+    ? collectFloatSamples(
+      bindings.TRANSLATION_X,
+      { axis: 'x', node, parent },
+      motionStyleTimelineOffset(node, 'TRANSLATION_X'),
+    )
     : [];
   const translationY = bindings.TRANSLATION_Y
-    ? collectFloatSamples(bindings.TRANSLATION_Y, { axis: 'y', node, parent })
+    ? collectFloatSamples(
+      bindings.TRANSLATION_Y,
+      { axis: 'y', node, parent },
+      motionStyleTimelineOffset(node, 'TRANSLATION_Y'),
+    )
     : [];
   const translationXY = bindings.TRANSLATION_XY
-    ? collectVectorSamples(bindings.TRANSLATION_XY, node, parent)
+    ? collectVectorSamples(bindings.TRANSLATION_XY, node, parent, motionStyleTimelineOffset(node, 'TRANSLATION_XY'))
     : [];
-  const rotation = bindings.ROTATION ? collectFloatSamples(bindings.ROTATION) : defaultRotationSamples();
-  const scaleX = bindings.SCALE_X ? collectFloatSamples(bindings.SCALE_X) : defaultScaleSamples(1);
-  const scaleY = bindings.SCALE_Y ? collectFloatSamples(bindings.SCALE_Y) : defaultScaleSamples(1);
-  const scaleXY = bindings.SCALE_XY ? collectVectorSamples(bindings.SCALE_XY) : [];
+  const rotation = bindings.ROTATION
+    ? collectFloatSamples(bindings.ROTATION, undefined, motionStyleTimelineOffset(node, 'ROTATION'))
+    : defaultRotationSamples();
+  const scaleX = bindings.SCALE_X
+    ? collectFloatSamples(bindings.SCALE_X, undefined, motionStyleTimelineOffset(node, 'SCALE_X'))
+    : defaultScaleSamples(1);
+  const scaleY = bindings.SCALE_Y
+    ? collectFloatSamples(bindings.SCALE_Y, undefined, motionStyleTimelineOffset(node, 'SCALE_Y'))
+    : defaultScaleSamples(1);
+  const scaleXY = bindings.SCALE_XY
+    ? collectVectorSamples(bindings.SCALE_XY, undefined, undefined, motionStyleTimelineOffset(node, 'SCALE_XY'))
+    : [];
 
   const sampleTimes = mergeSampleTimes([
     collectSampleTimes(translationX),

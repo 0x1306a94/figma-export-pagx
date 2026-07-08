@@ -212,7 +212,7 @@ function testSetTranslationSamplesKeepAbsoluteValues(): void {
   assert.equal(samples[0].time, 0);
   assert.equal(samples[0].value, 0);
   assert.equal(samples[1].time, 0.599);
-  assert.equal(samples[1].value, 423);
+  assert.equal(samples[1].value, -423);
 }
 
 function testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin(): void {
@@ -243,7 +243,7 @@ function testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin(): void {
   } as Parameters<typeof readTransformSamplesForTest>[0];
 
   const span = readFigmaTranslationSpanForTest(node);
-  assert.deepEqual(span, { x: 453, y: -76 });
+  assert.deepEqual(span, { x: -453, y: 76 });
 
   const transformSamples = readTransformSamplesForTest(node);
   assert.deepEqual(
@@ -252,8 +252,125 @@ function testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin(): void {
   );
   assert.deepEqual(
     resolveMatrixTranslationForTest(node, transformSamples, 0.496),
-    { x: 453, y: -76 },
+    { x: -453, y: 76 },
   );
+}
+
+function testFrame8Rectangle28ManualSetTranslationKeepsRawDirection(): void {
+  const node = {
+    id: '9:187',
+    type: 'RECTANGLE',
+    x: 279,
+    y: 1345,
+    width: 246,
+    height: 177,
+    constraints: { horizontal: 'MIN', vertical: 'MIN' },
+    animations: {
+      ROTATION: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 0 },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+            { timelinePosition: 0.86, value: { type: 'FLOAT' as const, value: 180.00000500895632 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+      TRANSLATION_XY: {
+        timelineDuration: 2,
+        baseValue: { type: 'VECTOR' as const, value: { x: 0, y: 0 } },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'VECTOR' as const, value: { x: 0, y: 0 } }, easing: LINEAR_EASING },
+            { timelinePosition: 0.86, value: { type: 'VECTOR' as const, value: { x: 499, y: -182 } }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const root = {
+    id: '9:183',
+    type: 'FRAME',
+    children: [node],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const animations = collectMotionAnimations(
+    root,
+    new Map([[node.id, 'layer_9_187']]),
+    new Map([[node.id, 'motion_group_9_187']]),
+    [],
+  );
+  const motionObject = animations[0].objects.find((item) => item.target === 'motion_group_9_187');
+  const positionX = motionObject?.channels.find((channel) => channel.name === 'position.x');
+  const positionY = motionObject?.channels.find((channel) => channel.name === 'position.y');
+  const rotation = motionObject?.channels.find((channel) => channel.name === 'rotation');
+
+  assert(positionX, 'Rectangle28 should export position.x');
+  assert(positionY, 'Rectangle28 should export position.y');
+  assert(rotation, 'Rectangle28 should export rotation');
+  assert.deepEqual(positionX.keyframes.map((keyframe) => keyframe.value), ['123', '622']);
+  assert.deepEqual(positionY.keyframes.map((keyframe) => keyframe.value), ['88.5', '-93.5']);
+  assert.deepEqual(rotation.keyframes.map((keyframe) => keyframe.value), ['0', '-180']);
+}
+
+function testFrame8Rectangle27OpacityUsesStyleTimelineOffset(): void {
+  const node = {
+    id: '9:186',
+    type: 'RECTANGLE',
+    x: 272,
+    y: 848,
+    width: 506,
+    height: 257,
+    animations: {
+      OPACITY: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 1 },
+        tracks: [{
+          keyframeOperation: 'SCALE' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 1 }, easing: LINEAR_EASING },
+            { timelinePosition: 0.41, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [{
+      name: 'motion.preset_name.opacity',
+      timelineOffset: 1.09,
+      props: { type: 'fadeOut' },
+    }],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const root = {
+    id: '9:183',
+    type: 'FRAME',
+    children: [node],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const animations = collectMotionAnimations(
+    root,
+    new Map([[node.id, 'layer_9_186']]),
+    new Map(),
+    [],
+  );
+  const alphaObject = animations[0].objects.find((item) => item.target === 'layer_9_186');
+  const alpha = alphaObject?.channels.find((channel) => channel.name === 'alpha');
+
+  assert(alpha, 'Rectangle27 should export alpha');
+  assert.deepEqual(alpha.keyframes.map((keyframe) => keyframe.time), [65, 90]);
+  assert.deepEqual(alpha.keyframes.map((keyframe) => keyframe.value), ['1', '0']);
 }
 
 function testResolveMatrixTransformOrderFromAnimationStyles(): void {
@@ -713,6 +830,8 @@ function run(): void {
   testComposeMatrixFollowsAnimationStyleOrder();
   testSetTranslationSamplesKeepAbsoluteValues();
   testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin();
+  testFrame8Rectangle28ManualSetTranslationKeepsRawDirection();
+  testFrame8Rectangle27OpacityUsesStyleTimelineOffset();
   testMotionGroupSizeAnimationKeepsEasing();
   testSizeOnlyMatrixAnimationKeepsEasing();
   console.log('figma-motion tests passed');
