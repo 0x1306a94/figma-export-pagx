@@ -115,6 +115,14 @@ function writeElement(element: PagxElement, indent: string): string {
       delete attrEntries.text;
       return `${indent}<Text${writeAttrs(attrEntries)}><![CDATA[${element.text}]]></Text>\n`;
     }
+    case 'group': {
+      let result = `${indent}<Group${writeAttrs(element.attrs)}>\n`;
+      for (const child of element.children) {
+        result += writeElement(child, `${indent}  `);
+      }
+      result += `${indent}</Group>\n`;
+      return result;
+    }
     case 'textbox': {
       let result = `${indent}<TextBox${writeAttrs(element.attrs)}>\n`;
       for (const child of element.children) {

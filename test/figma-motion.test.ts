@@ -77,6 +77,33 @@ function testOffsetTranslationKeepsRawWhenCloserToParentLeftEdge(): void {
   assert.equal(samples[1].value, 0);
 }
 
+function testOffsetTranslationNegatesUnderFlippedParent(): void {
+  const flippedParent = {
+    type: 'FRAME',
+    width: 880,
+    height: 1325,
+    absoluteTransform: [[-1, 0, 880], [0, -1, 1325]],
+  } as SceneNode;
+
+  const rectangle17 = {
+    type: 'RECTANGLE',
+    x: 49,
+    y: 158,
+    width: 340,
+    height: 304,
+    constraints: { horizontal: 'MIN', vertical: 'MIN' },
+    absoluteTransform: [[-1, 0, 831], [0, -1, 1167]],
+  } as SceneNode;
+
+  const samples = collectFloatSamplesForTest(slideInLeftBinding, {
+    axis: 'x',
+    node: rectangle17,
+    parent: flippedParent,
+  });
+  assert.equal(samples[0].value, 200);
+  assert.equal(samples[1].value, 0);
+}
+
 function testOffsetTranslationRightDirectionNearParentRightEdge(): void {
   const binding = {
     timelineDuration: 2,
@@ -272,7 +299,9 @@ function testResolveMatrixTransformOrderFromAnimationStyles(): void {
     },
   } as Parameters<typeof readTransformSamplesForTest>[0];
 
-  const transformSamples = readTransformSamplesForTest(node);
+  const diagnostics: Parameters<typeof readTransformSamplesForTest>[2] = [];
+  const transformSamples = readTransformSamplesForTest(node, null, diagnostics);
+  assert.deepEqual(diagnostics, [], 'SCALE keyframe operation should not warn');
   assert.deepEqual(
     resolveMatrixTransformOrderForTest(node, transformSamples),
     ['translation', 'scale', 'rotation'],
@@ -449,6 +478,7 @@ function testFrame4Rectangle23ManualSetRotationTiltsClockwise(): void {
   } as Parameters<typeof readTransformSamplesForTest>[0];
 
   const matrixChannel = buildMatrixChannelForTest(node);
+  assert.ok(matrixChannel!.keyframes.length > 3, 'rotation matrix should be baked to preserve center pivot');
   const peakKeyframe = matrixChannel!.keyframes[Math.floor(matrixChannel!.keyframes.length / 2)];
   const [, b] = peakKeyframe.value.split(',').map(Number);
   assert.ok(b > 0, 'manual SET rotation 0 to -180 should export clockwise matrix tilt');
@@ -500,7 +530,7 @@ function testRotateOutFullTurnBakesMatrixKeyframes(): void {
 
   const matrixChannel = buildMatrixChannelForTest(node);
   assert.ok(matrixChannel, 'rotateOut should export matrix channel');
-  assert.ok(matrixChannel!.keyframes.length > 2, 'full rotation should bake more than endpoint keys');
+  assert.ok(matrixChannel!.keyframes.length > 5, 'full rotation should bake enough frames to preserve center pivot');
 
   const midKeyframe = matrixChannel!.keyframes[Math.floor(matrixChannel!.keyframes.length / 2)];
   assert.notEqual(midKeyframe.value, '1,0,0,1,0,0', 'mid-frame rotation should not collapse to identity');
@@ -562,6 +592,7 @@ function run(): void {
   testPivotMatrixAtMinus90();
   testOffsetTranslationNegatesWhenCloserToParentRightEdge();
   testOffsetTranslationKeepsRawWhenCloserToParentLeftEdge();
+  testOffsetTranslationNegatesUnderFlippedParent();
   testOffsetTranslationRightDirectionNearParentRightEdge();
   testGroupChildSlideInLeftKeepsRawOffset();
   testScaleSamplesKeepRawValues();

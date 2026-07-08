@@ -108,7 +108,7 @@ const gradientXml = writePagxXml(gradientDocument);
 assert(gradientXml.includes('<LinearGradient'), 'linear gradient missing');
 assert(gradientXml.includes('<DropShadowStyle'), 'drop shadow missing');
 
-async function testMotionDataIsSkipped(): Promise<void> {
+async function testMotionDataIsExported(): Promise<void> {
   (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
     mixed: Symbol('mixed'),
   };
@@ -149,8 +149,113 @@ async function testMotionDataIsSkipped(): Promise<void> {
   } as unknown as FrameNode;
 
   const document = await mapFigmaToPagx(animatedRoot, createExportContext(animatedRoot));
-  assert(document.animations.length === 0, 'motion data should not be exported yet');
-  assert(!writePagxXml(document).includes('<Animations>'), 'xml should not include Animations');
+  const exportedXml = writePagxXml(document);
+  assert(document.animations.length === 1, 'motion data should be exported');
+  assert(exportedXml.includes('<Animations>'), 'xml should include Animations');
+  assert(exportedXml.includes('<Channel name="alpha" type="float">'), 'opacity should export as alpha channel');
+  assert(exportedXml.includes('<Key time="0" value="0"/>'), 'first opacity keyframe missing');
+  assert(exportedXml.includes('<Key time="60" value="1"/>'), 'last opacity keyframe missing');
+}
+
+async function testNoMotionDataSkipsAnimations(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  const staticRoot = {
+    id: '1:1',
+    name: 'Static Root',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 100,
+    height: 100,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 100 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [],
+    animations: {},
+    animationStyles: [],
+    timelines: [],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(staticRoot, createExportContext(staticRoot));
+  assert(document.animations.length === 0, 'static root should not export animations');
+  assert(!writePagxXml(document).includes('<Animations>'), 'xml should omit Animations without motion data');
+}
+
+async function testRotationMotionUsesInnerGroup(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  const root = {
+    id: '1:1',
+    name: 'Root',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 200,
+    height: 200,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 200, height: 200 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [{
+      id: '1:2',
+      name: 'Rotating Rectangle',
+      type: 'RECTANGLE',
+      visible: true,
+      opacity: 1,
+      blendMode: 'PASS_THROUGH',
+      width: 100,
+      height: 80,
+      x: 50,
+      y: 60,
+      absoluteTransform: [[1, 0, 50], [0, 1, 60]],
+      absoluteBoundingBox: { x: 50, y: 60, width: 100, height: 80 },
+      fills: [],
+      strokes: [],
+      effects: [],
+      animations: {
+        ROTATION: {
+          timelineDuration: 1,
+          baseValue: { type: 'FLOAT' as const, value: 0 },
+          tracks: [{
+            keyframeOperation: 'OFFSET' as const,
+            keyframes: [
+              { timelinePosition: 0, value: { type: 'FLOAT' as const, value: -90 }, easing: { type: 'LINEAR' as const } },
+              { timelinePosition: 1, value: { type: 'FLOAT' as const, value: 0 }, easing: { type: 'LINEAR' as const } },
+            ],
+          }],
+        },
+      },
+      animationStyles: [],
+      timelines: [],
+    }],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 1 }],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(root, createExportContext(root));
+  const exportedXml = writePagxXml(document);
+  assert(exportedXml.includes('<Group'), 'rotation motion should wrap contents in an inner Group');
+  assert(exportedXml.includes('anchor="50,40"'), 'motion Group should rotate around shape center');
+  assert(exportedXml.includes('position="50,40"'), 'motion Group position should match anchor at rest');
+  assert(exportedXml.includes('<Channel name="rotation" type="float">'), 'rotation motion should use scalar rotation channel');
+  assert(!exportedXml.includes('<Channel name="matrix" type="matrix">'), 'rotation motion should not use matrix channel');
 }
 
 async function testStaticExportSkipsLayerMatrix(): Promise<void> {
@@ -265,7 +370,9 @@ async function testStaticExportKeepsRotatedLayerMatrix(): Promise<void> {
 }
 
 Promise.all([
-  testMotionDataIsSkipped(),
+  testMotionDataIsExported(),
+  testNoMotionDataSkipsAnimations(),
+  testRotationMotionUsesInnerGroup(),
   testStaticExportSkipsLayerMatrix(),
   testStaticExportKeepsRotatedLayerMatrix(),
 ]).then(() => {

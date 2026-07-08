@@ -53,6 +53,7 @@ export type PagxElement =
   | { kind: 'polystar'; attrs: Record<string, PagxAttrValue> }
   | { kind: 'path'; attrs: Record<string, PagxAttrValue> }
   | { kind: 'text'; attrs: Record<string, PagxAttrValue>; text: string }
+  | { kind: 'group'; attrs: Record<string, PagxAttrValue>; children: PagxElement[] }
   | { kind: 'textbox'; attrs: Record<string, PagxAttrValue>; children: PagxElement[] }
   | { kind: 'fill'; attrs: Record<string, PagxAttrValue>; colorSource?: ColorSource }
   | { kind: 'stroke'; attrs: Record<string, PagxAttrValue>; colorSource?: ColorSource }
@@ -127,4 +128,5 @@ export type ExportContext = {
   usedIds: Set<string>;
   nodeCount: number;
   layerIdByFigmaId: Map<string, string>;
+  motionTargetIdByFigmaId: Map<string, string>;
 };

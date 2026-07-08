@@ -25,7 +25,12 @@ import {
   strokesToElements,
 } from './figma-reader';
 import { shapeElementFromPathData } from './path-detect';
-import { motionLayoutPositionForExport, motionLayoutSizeForExport } from './figma-motion';
+import {
+  collectMotionAnimations,
+  motionLayoutPositionForExport,
+  motionLayoutSizeForExport,
+  needsMotionTransformGroup,
+} from './figma-motion';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,
@@ -155,6 +160,30 @@ function wrapTextContentsInTextBox(contents: PagxElement[], node: TextNode): Pag
     kind: 'textbox',
     attrs: textBoxAttrs(node),
     children: [...textElements, ...otherElements],
+  }];
+}
+
+function wrapContentsInMotionGroup(
+  contents: PagxElement[],
+  node: SceneNode,
+  groupId: string,
+): PagxElement[] {
+  const size = resolvedNodeSize(node);
+  const width = size?.width ?? ('width' in node ? roundDimension(node.width) : 0);
+  const height = size?.height ?? ('height' in node ? roundDimension(node.height) : 0);
+  const center = `${roundDimension(width / 2)},${roundDimension(height / 2)}`;
+
+  return [{
+    kind: 'group',
+    attrs: {
+      id: groupId,
+      name: `${node.name} Motion`,
+      anchor: center,
+      position: center,
+      width,
+      height,
+    },
+    children: contents,
   }];
 }
 
@@ -536,7 +565,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
   }
 
   if (isGeometryNode(node)) {
-    const contents = shapeContents(node, ctx);
+    let contents = shapeContents(node, ctx);
     const imageElements = await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx);
     for (const element of imageElements) {
       const fillIndex = contents.findIndex((item) => item.kind === 'fill');
@@ -546,6 +575,12 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
         contents.unshift(...imageElements);
         break;
       }
+    }
+
+    if (needsMotionTransformGroup(node)) {
+      const groupId = ensureUniqueId(figmaIdToPagxId(node.id, 'motion_group'), ctx.usedIds);
+      ctx.motionTargetIdByFigmaId.set(node.id, groupId);
+      contents = wrapContentsInMotionGroup(contents, node, groupId);
     }
 
     return {
@@ -581,6 +616,7 @@ export function createExportContext(root: SceneNode): ExportContext {
     usedIds: new Set<string>(),
     nodeCount: 0,
     layerIdByFigmaId: new Map<string, string>(),
+    motionTargetIdByFigmaId: new Map<string, string>(),
   };
 }
 
@@ -616,7 +652,7 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
     width,
     height,
     resources: ctx.resources,
-    animations: [],
+    animations: collectMotionAnimations(root, ctx.layerIdByFigmaId, ctx.motionTargetIdByFigmaId, ctx.diagnostics),
     layers,
     customData: {
       'data-exported-by': 'figma-export-pagx',
