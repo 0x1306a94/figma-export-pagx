@@ -19,7 +19,6 @@ import {
   readCornerRadius,
   readFlexGrow,
   geometryPathData,
-  layoutPositionAttrs,
   nodeMatrixInParent,
   parentUsesAutoLayout,
   strokesToElements,

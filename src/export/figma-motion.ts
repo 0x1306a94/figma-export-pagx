@@ -505,13 +505,6 @@ function readPagxTranslationSpan(
   };
 }
 
-function readFigmaTranslationSpan(
-  node: MotionCapableNode,
-  parent: SceneNode | null,
-): { x: number; y: number } | null {
-  return readPagxTranslationSpan(node, parent);
-}
-
 export function motionLayoutPositionForExport(
   node: SceneNode,
   parent: SceneNode | null,
@@ -1597,7 +1590,7 @@ function hasAnySpringEasing(
     || hasSpringEasing(sizeSamples.height);
 }
 
-function resolveRotationBase(binding: KeyframeBinding | undefined): number {
+function resolveRotationBase(): number {
   // OFFSET 与 SET 的动画增量都以 0 为基准；静止角 baseValue 由静态 Layer matrix 表达
   return 0;
 }
@@ -1680,7 +1673,6 @@ function buildMatrixChannel(
   node: MotionCapableNode,
   parent: SceneNode | null,
   diagnostics: Diagnostic[],
-  durationFrames: number,
 ): PagxChannel | null {
   const transformSamples = readTransformSamples(node, parent, diagnostics);
   const sizeSamples = readSizeSamples(node, diagnostics);
@@ -1694,7 +1686,7 @@ function buildMatrixChannel(
   const sampleMatrixFloat = bakePerFrame ? sampleFloatAtEased : sampleFloatAt;
   const sampleTimes = buildMatrixSampleTimes(node, transformSamples, sizeSamples);
   const rotationBinding = node.animations.ROTATION;
-  const rotationBase = resolveRotationBase(rotationBinding);
+  const rotationBase = resolveRotationBase();
   const rotationDirection = resolveRotationDirection(node);
   const rotationPresetType = resolveRotationPresetType(node);
   const usesSetRotation = hasSetRotationAnimation(node);
@@ -2060,8 +2052,8 @@ export function resolvePagxRotationDegreesForTest(
   );
 }
 
-export function resolveRotationBaseForTest(binding: KeyframeBinding | undefined): number {
-  return resolveRotationBase(binding);
+export function resolveRotationBaseForTest(_binding: KeyframeBinding | undefined): number {
+  return resolveRotationBase();
 }
 
 export function shouldBakeMatrixPerFrameForTest(
@@ -2075,7 +2067,7 @@ export function buildMatrixChannelForTest(
   node: MotionCapableNode,
   parent: SceneNode | null = null,
 ): PagxChannel | null {
-  return buildMatrixChannel(node, parent, [], 120);
+  return buildMatrixChannel(node, parent, []);
 }
 
 export function springProgressForTest(progress: number, bounce: number): number {
@@ -2216,7 +2208,7 @@ export function collectMotionAnimations(
       continue;
     }
 
-    const matrix = buildMatrixChannel(node, parent, diagnostics, durationFrames);
+    const matrix = buildMatrixChannel(node, parent, diagnostics);
     if (matrix) {
       objects.push({ target: targetId, channels: [matrix] });
     }
