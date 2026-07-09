@@ -114,6 +114,174 @@ function hasSetRotationAnimation(node: MotionCapableNode): boolean {
   return !!binding && bindingUsesSetOperation(binding);
 }
 
+function hasRotationStyleAnimation(node: MotionCapableNode): boolean {
+  return (node.animationStyles ?? []).some(isRotationStyle);
+}
+
+function hasOnlySetRotationTransformAnimation(node: MotionCapableNode): boolean {
+  if (!hasSetRotationAnimation(node)) {
+    return false;
+  }
+  return TRANSFORM_FIELDS.every((field) => {
+    if (field === 'ROTATION') {
+      return true;
+    }
+    return !node.animations[field];
+  });
+}
+
+function bindingUsesSetVectorOperation(binding: KeyframeBinding | undefined): boolean {
+  return !!binding && binding.tracks.some((track) => track.keyframeOperation === 'SET');
+}
+
+function hasOnlySetScaleTransformAnimation(node: MotionCapableNode): boolean {
+  const scaleBinding = node.animations.SCALE_XY;
+  if (!bindingUsesSetVectorOperation(scaleBinding)) {
+    return false;
+  }
+  return TRANSFORM_FIELDS.every((field) => {
+    if (field === 'SCALE_XY') {
+      return true;
+    }
+    return !node.animations[field];
+  });
+}
+
+type MotionPivotSource = 'cached' | 'inferred-render-bounds' | 'rotation-top-left' | 'center';
+type MotionPivot = { x: number; y: number; source: MotionPivotSource };
+
+const PAGX_PLUGIN_NAMESPACE = 'pagx';
+const PAGX_ANCHOR_KEY = 'anchor';
+
+function parseCachedMotionPivot(node: SceneNode): MotionPivot | null {
+  if (!('getSharedPluginData' in node)) {
+    return null;
+  }
+  const value = node.getSharedPluginData(PAGX_PLUGIN_NAMESPACE, PAGX_ANCHOR_KEY);
+  const [xText, yText] = value.split(',');
+  const x = Number(xText);
+  const y = Number(yText);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return { x, y, source: 'cached' };
+}
+
+function cacheMotionPivot(node: SceneNode, pivot: MotionPivot): void {
+  if (!('setSharedPluginData' in node)) {
+    return;
+  }
+  node.setSharedPluginData(
+    PAGX_PLUGIN_NAMESPACE,
+    PAGX_ANCHOR_KEY,
+    `${roundDimension(pivot.x)},${roundDimension(pivot.y)}`,
+  );
+}
+
+function snapToCommonAnchor(value: number, size: number): number {
+  const candidates = [0, size / 2, size];
+  const tolerance = Math.max(1, size * 0.03);
+  for (const candidate of candidates) {
+    if (Math.abs(value - candidate) <= tolerance) {
+      return roundDimension(candidate);
+    }
+  }
+  return roundDimension(value);
+}
+
+function inferScalePivotFromRenderBounds(
+  node: MotionCapableNode,
+  width: number,
+  height: number,
+): MotionPivot | null {
+  if (
+    !hasOnlySetScaleTransformAnimation(node)
+    || !('absoluteBoundingBox' in node)
+    || !('absoluteRenderBounds' in node)
+    || !node.absoluteBoundingBox
+    || !node.absoluteRenderBounds
+    || width <= 0
+    || height <= 0
+  ) {
+    return null;
+  }
+
+  const bounds = node.absoluteBoundingBox;
+  const renderBounds = node.absoluteRenderBounds;
+  const scaleX = renderBounds.width / bounds.width;
+  const scaleY = renderBounds.height / bounds.height;
+  if (
+    Math.abs(renderBounds.width - bounds.width) < 0.2
+    && Math.abs(renderBounds.height - bounds.height) < 0.2
+  ) {
+    return null;
+  }
+
+  const pivotX = (renderBounds.x - bounds.x) / (1 - scaleX);
+  const pivotY = (renderBounds.y - bounds.y) / (1 - scaleY);
+  if (!Number.isFinite(pivotX) || !Number.isFinite(pivotY)) {
+    return null;
+  }
+
+  return {
+    x: snapToCommonAnchor(pivotX, width),
+    y: snapToCommonAnchor(pivotY, height),
+    source: 'inferred-render-bounds',
+  };
+}
+
+export function motionPivotForExport(
+  node: SceneNode,
+  width: number,
+  height: number,
+): MotionPivot {
+  if (isMotionNode(node)) {
+    const inferredPivot = inferScalePivotFromRenderBounds(node, width, height);
+    if (inferredPivot) {
+      cacheMotionPivot(node, inferredPivot);
+      return inferredPivot;
+    }
+  }
+
+  const cachedPivot = parseCachedMotionPivot(node);
+  if (cachedPivot) {
+    return cachedPivot;
+  }
+
+  if (isMotionNode(node)) {
+    if (hasOnlySetRotationTransformAnimation(node) && !hasRotationStyleAnimation(node)) {
+      return { x: 0, y: 0, source: 'rotation-top-left' };
+    }
+  }
+
+  return { x: roundDimension(width / 2), y: roundDimension(height / 2), source: 'center' };
+}
+
+export function refreshMotionPivotCache(node: SceneNode): MotionPivot | null {
+  if (
+    !isMotionNode(node)
+    || !('width' in node)
+    || !('height' in node)
+    || typeof node.width !== 'number'
+    || typeof node.height !== 'number'
+  ) {
+    return null;
+  }
+
+  const inferredPivot = inferScalePivotFromRenderBounds(node, node.width, node.height);
+  if (!inferredPivot) {
+    if (hasOnlySetRotationTransformAnimation(node) && !hasRotationStyleAnimation(node)) {
+      const rotationPivot: MotionPivot = { x: 0, y: 0, source: 'rotation-top-left' };
+      cacheMotionPivot(node, rotationPivot);
+      return rotationPivot;
+    }
+    return null;
+  }
+
+  cacheMotionPivot(node, inferredPivot);
+  return inferredPivot;
+}
+
 function readSetRotationOrigin(binding: KeyframeBinding): number {
   let minTime = Number.POSITIVE_INFINITY;
   let origin = 0;
@@ -681,6 +849,57 @@ function serializeAnimationsObject(animations: Animations): Record<string, unkno
   return serialized;
 }
 
+function serializeTransform(transform: Transform | undefined): Transform | undefined {
+  return transform ? [[...transform[0]], [...transform[1]]] : undefined;
+}
+
+function serializeRect(rect: Rect | null | undefined): Rect | undefined {
+  return rect ? {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  } : undefined;
+}
+
+function probeAnchorFields(node: SceneNode): Record<string, string> {
+  const fields = [
+    'anchorPoint',
+    'anchor',
+    'pivot',
+    'pivotPoint',
+    'transformPivot',
+    'transformOrigin',
+    'rotationOrigin',
+    'rotationCenter',
+    'origin',
+    'motionAnchor',
+    'motionPivot',
+    'manualAnchor',
+  ];
+  const result: Record<string, string> = {};
+  const nodeRecord = node as unknown as Record<string, unknown>;
+
+  for (const field of fields) {
+    try {
+      result[field] = nodeRecord[field] === undefined ? 'missing' : 'present';
+    } catch (error) {
+      result[field] = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return result;
+}
+
+function motionPivotDebugData(node: SceneNode): MotionPivot | undefined {
+  if (!('width' in node) || !('height' in node)) {
+    return undefined;
+  }
+  const motionSize = motionLayoutSizeForExport(node);
+  const width = motionSize?.width ?? roundDimension(node.width);
+  const height = motionSize?.height ?? roundDimension(node.height);
+  return motionPivotForExport(node, width, height);
+}
+
 export function collectMotionDebugData(root: SceneNode): unknown[] {
   const entries: unknown[] = [];
 
@@ -701,6 +920,15 @@ export function collectMotionDebugData(root: SceneNode): unknown[] {
           constraints: 'constraints' in node ? node.constraints : undefined,
           parentWidth: parent && 'width' in parent ? parent.width : undefined,
           parentHeight: parent && 'height' in parent ? parent.height : undefined,
+        },
+        transform: {
+          rotation: 'rotation' in node ? node.rotation : undefined,
+          relativeTransform: 'relativeTransform' in node ? serializeTransform(node.relativeTransform) : undefined,
+          absoluteTransform: 'absoluteTransform' in node ? serializeTransform(node.absoluteTransform) : undefined,
+          absoluteBoundingBox: 'absoluteBoundingBox' in node ? serializeRect(node.absoluteBoundingBox) : undefined,
+          absoluteRenderBounds: 'absoluteRenderBounds' in node ? serializeRect(node.absoluteRenderBounds) : undefined,
+          anchorProbe: probeAnchorFields(node),
+          motionPivot: motionPivotDebugData(node),
         },
         hasMotionData: hasMotionData(node),
         animationKeys,
@@ -1356,7 +1584,7 @@ function resolveRotationPivot(
     height *= scaleY;
   }
 
-  return { x: width / 2, y: height / 2 };
+  return motionPivotForExport(node, width, height);
 }
 
 function readTransformSamples(
@@ -1514,7 +1742,11 @@ function resolveMatrixTransformOrder(
   ) {
     fallback.push('translation');
   }
-  if (isAnimatedFloat(transformSamples.scaleX) || isAnimatedFloat(transformSamples.scaleY)) {
+  if (
+    isAnimatedFloat(transformSamples.scaleX)
+    || isAnimatedFloat(transformSamples.scaleY)
+    || isAnimatedVector(transformSamples.scaleXY)
+  ) {
     fallback.push('scale');
   }
   if (isAnimatedFloat(transformSamples.rotation)) {

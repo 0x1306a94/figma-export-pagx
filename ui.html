@@ -26,9 +26,24 @@
       margin-bottom: 8px;
     }
     #export:disabled { opacity: 0.6; cursor: default; }
+    #refresh-motion-anchor {
+      background: #0d9488;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    #refresh-motion-anchor:disabled { opacity: 0.6; cursor: default; }
     #cancel {
       background: #f0f0f0;
       color: #333;
+    }
+    #motion-warning {
+      margin: 0 0 12px;
+      padding: 8px;
+      background: #fff7e6;
+      color: #8a6100;
+      border: 1px solid #f3c96b;
+      border-radius: 6px;
+      font-size: 11px;
     }
     #meta {
       margin: 12px 0;
@@ -59,6 +74,15 @@
       color: #a12828;
       border-radius: 6px;
     }
+    #refresh-status {
+      display: none;
+      margin: 0 0 12px;
+      padding: 8px;
+      background: #ecfdf5;
+      color: #047857;
+      border-radius: 6px;
+      font-size: 11px;
+    }
     #motion-panel {
       margin-top: 12px;
     }
@@ -88,6 +112,11 @@
 <body>
   <h2>导出 PAGX</h2>
   <p>选择一个 Frame 或图层作为 root，然后导出为 .pagx 文件。</p>
+  <div id="motion-warning">
+    如果存在手动调整过锚点的节点，请先将 Figma Motion 时间线拖到该节点动画起始点稍后，选中该节点并点击刷新锚点缓存。全部刷新后，再回到起始位置选中 Frame 导出。
+  </div>
+  <button id="refresh-motion-anchor">刷新锚点缓存</button>
+  <div id="refresh-status"></div>
   <button id="export">导出 PAGX</button>
   <button id="cancel">关闭</button>
   <div id="meta"></div>
@@ -100,9 +129,11 @@
   </div>
   <script>
     const exportButton = document.getElementById('export');
+    const refreshMotionAnchorButton = document.getElementById('refresh-motion-anchor');
     const cancelButton = document.getElementById('cancel');
     const metaEl = document.getElementById('meta');
     const errorEl = document.getElementById('error');
+    const refreshStatusEl = document.getElementById('refresh-status');
     const diagnosticsEl = document.getElementById('diagnostics');
     const motionHintEl = document.getElementById('motion-hint');
     const motionJsonEl = document.getElementById('motion-json');
@@ -115,6 +146,11 @@
     function clearError() {
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+    }
+
+    function showRefreshStatus(message) {
+      refreshStatusEl.style.display = 'block';
+      refreshStatusEl.textContent = message;
     }
 
     function renderDiagnostics(items) {
@@ -158,6 +194,13 @@
       parent.postMessage({ pluginMessage: { type: 'export-pagx' } }, '*');
     };
 
+    refreshMotionAnchorButton.onclick = () => {
+      clearError();
+      refreshMotionAnchorButton.disabled = true;
+      refreshMotionAnchorButton.textContent = '刷新中...';
+      parent.postMessage({ pluginMessage: { type: 'refresh-motion-anchor' } }, '*');
+    };
+
     cancelButton.onclick = () => {
       parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
     };
@@ -168,6 +211,8 @@
 
       exportButton.disabled = false;
       exportButton.textContent = '导出 PAGX';
+      refreshMotionAnchorButton.disabled = false;
+      refreshMotionAnchorButton.textContent = '刷新锚点缓存';
 
       if (msg.type === 'export-error') {
         showError(msg.error);
@@ -185,6 +230,11 @@
 
       if (msg.type === 'selection-motion-data') {
         renderMotionData(msg);
+        return;
+      }
+
+      if (msg.type === 'refresh-motion-anchor-result') {
+        showRefreshStatus(msg.message);
       }
     };
   </script>

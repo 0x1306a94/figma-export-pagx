@@ -258,6 +258,160 @@ async function testRotationMotionUsesInnerGroup(): Promise<void> {
   assert(!exportedXml.includes('<Channel name="matrix" type="matrix">'), 'rotation motion should not use matrix channel');
 }
 
+async function testManualSetRotationMotionUsesTopLeftPivot(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  const root = {
+    id: '1:1',
+    name: 'Root',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 812,
+    height: 1229,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 812, height: 1229 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [{
+      id: '15:22',
+      name: 'Rectangle 31',
+      type: 'RECTANGLE',
+      visible: true,
+      opacity: 1,
+      blendMode: 'PASS_THROUGH',
+      width: 287,
+      height: 220,
+      x: 160,
+      y: 782,
+      absoluteTransform: [[1, 0, 160], [0, 1, 782]],
+      absoluteBoundingBox: { x: 160, y: 782, width: 287, height: 220 },
+      fills: [],
+      strokes: [],
+      effects: [],
+      animations: {
+        ROTATION: {
+          timelineDuration: 2,
+          baseValue: { type: 'FLOAT' as const, value: 0 },
+          tracks: [{
+            keyframeOperation: 'SET' as const,
+            keyframes: [
+              { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: { type: 'LINEAR' as const } },
+              { timelinePosition: 0.499, value: { type: 'FLOAT' as const, value: 180.00000500895632 }, easing: { type: 'LINEAR' as const } },
+            ],
+          }],
+        },
+      },
+      animationStyles: [],
+      timelines: [],
+    }],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(root, createExportContext(root));
+  const exportedXml = writePagxXml(document);
+  assert(exportedXml.includes('anchor="0,0"'), 'manual SET rotation should use top-left anchor');
+  assert(exportedXml.includes('position="0,0"'), 'manual SET rotation position should match top-left anchor');
+  assert(exportedXml.includes('<Channel name="rotation" type="float">'), 'manual SET rotation should use scalar rotation channel');
+}
+
+async function testScaleMotionInfersPivotFromRenderBounds(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  let cachedAnchor = '';
+  const root = {
+    id: '1:1',
+    name: 'Root',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 812,
+    height: 1229,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 812, height: 1229 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [{
+      id: '17:92',
+      name: 'Rectangle 32',
+      type: 'RECTANGLE',
+      visible: true,
+      opacity: 1,
+      blendMode: 'PASS_THROUGH',
+      width: 177,
+      height: 155,
+      x: 424,
+      y: 1050,
+      absoluteTransform: [[1, 0, 424], [0, 1, 1050]],
+      absoluteBoundingBox: { x: 424, y: 1050, width: 177, height: 155 },
+      absoluteRenderBounds: {
+        x: 363.043701171875,
+        y: 1023.31005859375,
+        width: 237.956298828125,
+        height: 205.68994140625,
+      },
+      getSharedPluginData(namespace: string, key: string): string {
+        return namespace === 'pagx' && key === 'anchor' ? cachedAnchor : '';
+      },
+      setSharedPluginData(namespace: string, key: string, value: string): void {
+        if (namespace === 'pagx' && key === 'anchor') {
+          cachedAnchor = value;
+        }
+      },
+      fills: [],
+      strokes: [],
+      effects: [],
+      animations: {
+        SCALE_XY: {
+          timelineDuration: 2,
+          baseValue: { type: 'VECTOR' as const, value: { x: 1, y: 1 } },
+          tracks: [{
+            keyframeOperation: 'SET' as const,
+            keyframes: [
+              { timelinePosition: 0, value: { type: 'VECTOR' as const, value: { x: 1, y: 1 } }, easing: { type: 'LINEAR' as const } },
+              {
+                timelinePosition: 0.496,
+                value: { type: 'VECTOR' as const, value: { x: 2.960423469543457, y: 2.960423469543457 } },
+                easing: { type: 'LINEAR' as const },
+              },
+            ],
+          }],
+        },
+      },
+      animationStyles: [],
+      timelines: [],
+    }],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(root, createExportContext(root));
+  const exportedXml = writePagxXml(document);
+  assert(exportedXml.includes('anchor="177,77.5"'), 'scale motion should infer right-center anchor');
+  assert(exportedXml.includes('position="177,77.5"'), 'scale motion position should match inferred anchor');
+  assert(exportedXml.includes('<Channel name="scale.x" type="float">'), 'scale motion should use runtime-supported scale.x channel');
+  assert(exportedXml.includes('<Channel name="scale.y" type="float">'), 'scale motion should use runtime-supported scale.y channel');
+  assert(!exportedXml.includes('<Channel name="matrix" type="matrix">'), 'Group target should not use unsupported matrix channel');
+  assert(cachedAnchor === '177,77.5', 'inferred scale anchor should be cached');
+}
+
 async function testStaticExportSkipsLayerMatrix(): Promise<void> {
   (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
     mixed: Symbol('mixed'),
@@ -444,6 +598,8 @@ Promise.all([
   testMotionDataIsExported(),
   testNoMotionDataSkipsAnimations(),
   testRotationMotionUsesInnerGroup(),
+  testManualSetRotationMotionUsesTopLeftPivot(),
+  testScaleMotionInfersPivotFromRenderBounds(),
   testStaticExportSkipsLayerMatrix(),
   testStaticExportKeepsRotatedLayerMatrix(),
   testSiblingMaskExportsMaskReference(),

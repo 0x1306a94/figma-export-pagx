@@ -28,6 +28,7 @@ import {
   collectMotionAnimations,
   motionLayoutPositionForExport,
   motionLayoutSizeForExport,
+  motionPivotForExport,
   needsMotionTransformGroup,
 } from './figma-motion';
 
@@ -186,15 +187,16 @@ function wrapContentsInMotionGroup(
   const size = resolvedNodeSize(node);
   const width = size?.width ?? ('width' in node ? roundDimension(node.width) : 0);
   const height = size?.height ?? ('height' in node ? roundDimension(node.height) : 0);
-  const center = `${roundDimension(width / 2)},${roundDimension(height / 2)}`;
+  const pivot = motionPivotForExport(node, width, height);
+  const pivotPosition = `${pivot.x},${pivot.y}`;
 
   return [{
     kind: 'group',
     attrs: {
       id: groupId,
       name: `${node.name} Motion`,
-      anchor: center,
-      position: center,
+      anchor: pivotPosition,
+      position: pivotPosition,
       width,
       height,
     },

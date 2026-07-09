@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import {
   applyRotationDirectionForTest,
   buildMatrixChannelForTest,
+  collectMotionDebugData,
   collectMotionAnimations,
   collectFloatSamplesForTest,
   composeMotionMatrixForTest,
   readFigmaTranslationSpanForTest,
+  motionPivotForExport,
+  refreshMotionPivotCache,
   readTransformSamplesForTest,
   resolveMatrixTransformOrderForTest,
   resolveMatrixTranslationForTest,
@@ -20,6 +23,10 @@ import { pagxMotionMatrixStringFromComponents } from '../src/export/figma-reader
 
 const LINEAR_EASING = { type: 'LINEAR' as const };
 const EASE_OUT = { type: 'EASE_OUT' as const };
+
+type SharedPluginDataStore = {
+  value: string;
+};
 
 const frame4Parent = {
   width: 400,
@@ -803,6 +810,251 @@ function testSizeOnlyMatrixAnimationKeepsEasing(): void {
   assert.equal(matrixChannel.keyframes[0].bezierIn, '0.58,1');
 }
 
+function testMotionDebugDataIncludesTransformDetails(): void {
+  const node = {
+    id: '15:22',
+    name: 'Rectangle 31',
+    type: 'RECTANGLE',
+    x: 160,
+    y: 782,
+    width: 287,
+    height: 220,
+    rotation: 0,
+    relativeTransform: [[1, 0, 160], [0, 1, 782]],
+    absoluteTransform: [[1, 0, 1017], [0, 1, 3036]],
+    absoluteBoundingBox: { x: 1017, y: 3036, width: 287, height: 220 },
+    absoluteRenderBounds: { x: 1017, y: 3036, width: 287, height: 220 },
+    animations: {
+      ROTATION: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 0 },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+            { timelinePosition: 0.499, value: { type: 'FLOAT' as const, value: 180 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const [debugEntry] = collectMotionDebugData(node) as Array<{
+    transform?: {
+      rotation?: number;
+      relativeTransform?: Transform;
+      absoluteTransform?: Transform;
+      absoluteBoundingBox?: Rect;
+      absoluteRenderBounds?: Rect;
+      anchorProbe?: Record<string, string>;
+    };
+  }>;
+
+  assert.deepEqual(debugEntry.transform?.relativeTransform, [[1, 0, 160], [0, 1, 782]]);
+  assert.deepEqual(debugEntry.transform?.absoluteTransform, [[1, 0, 1017], [0, 1, 3036]]);
+  assert.deepEqual(debugEntry.transform?.absoluteBoundingBox, { x: 1017, y: 3036, width: 287, height: 220 });
+  assert.deepEqual(debugEntry.transform?.absoluteRenderBounds, { x: 1017, y: 3036, width: 287, height: 220 });
+  assert.equal(debugEntry.transform?.rotation, 0);
+  assert.equal(debugEntry.transform?.anchorProbe?.anchorPoint, 'missing');
+}
+
+function rectangle32ScaleNode(
+  renderBounds: Rect,
+  sharedPluginDataStore: SharedPluginDataStore = { value: '' },
+): SceneNode {
+  return {
+    id: '17:92',
+    name: 'Rectangle 32',
+    type: 'RECTANGLE',
+    x: 424,
+    y: 1050,
+    width: 177,
+    height: 155,
+    absoluteBoundingBox: { x: 1281, y: 3304, width: 177, height: 155 },
+    absoluteRenderBounds: renderBounds,
+    getSharedPluginData(namespace: string, key: string): string {
+      return namespace === 'pagx' && key === 'anchor' ? sharedPluginDataStore.value : '';
+    },
+    setSharedPluginData(namespace: string, key: string, value: string): void {
+      if (namespace === 'pagx' && key === 'anchor') {
+        sharedPluginDataStore.value = value;
+      }
+    },
+    animations: {
+      SCALE_XY: {
+        timelineDuration: 2,
+        baseValue: { type: 'VECTOR' as const, value: { x: 1, y: 1 } },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'VECTOR' as const, value: { x: 1, y: 1 } }, easing: LINEAR_EASING },
+            {
+              timelinePosition: 0.496,
+              value: { type: 'VECTOR' as const, value: { x: 2.960423469543457, y: 2.960423469543457 } },
+              easing: LINEAR_EASING,
+            },
+          ],
+        }],
+      },
+    },
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+}
+
+function testScalePivotInfersAndCachesAnchorFromRenderBounds(): void {
+  const store = { value: '' };
+  const node = rectangle32ScaleNode({
+    x: 1220.043701171875,
+    y: 3277.31005859375,
+    width: 237.956298828125,
+    height: 205.68994140625,
+  }, store);
+
+  assert.deepEqual(motionPivotForExport(node, 177, 155), {
+    x: 177,
+    y: 77.5,
+    source: 'inferred-render-bounds',
+  });
+  assert.equal(store.value, '177,77.5');
+}
+
+function testScalePivotUsesCachedAnchorAtTimelineStart(): void {
+  const node = rectangle32ScaleNode({
+    x: 1280.992431640625,
+    y: 3303.99658203125,
+    width: 177.007568359375,
+    height: 155.006591796875,
+  }, { value: '177,77.5' });
+
+  assert.deepEqual(motionPivotForExport(node, 177, 155), {
+    x: 177,
+    y: 77.5,
+    source: 'cached',
+  });
+}
+
+function testScalePivotRefreshesStaleCacheFromRenderBounds(): void {
+  const store = { value: '177,130.39' };
+  const node = rectangle32ScaleNode({
+    x: 1220.043701171875,
+    y: 3277.31005859375,
+    width: 237.956298828125,
+    height: 205.68994140625,
+  }, store);
+
+  assert.deepEqual(motionPivotForExport(node, 177, 155), {
+    x: 177,
+    y: 77.5,
+    source: 'inferred-render-bounds',
+  });
+  assert.equal(store.value, '177,77.5');
+}
+
+function testRefreshMotionPivotCacheUsesCurrentRenderBounds(): void {
+  const store = { value: '177,130.39' };
+  const node = rectangle32ScaleNode({
+    x: 1220.043701171875,
+    y: 3277.31005859375,
+    width: 237.956298828125,
+    height: 205.68994140625,
+  }, store);
+
+  assert.deepEqual(refreshMotionPivotCache(node), {
+    x: 177,
+    y: 77.5,
+    source: 'inferred-render-bounds',
+  });
+  assert.equal(store.value, '177,77.5');
+}
+
+function testRefreshMotionPivotCacheAllowsSmallTimelineNudge(): void {
+  const store = { value: '' };
+  const node = rectangle32ScaleNode({
+    x: 1279.23,
+    y: 3303.225,
+    width: 178.77,
+    height: 156.55,
+  }, store);
+
+  assert.deepEqual(refreshMotionPivotCache(node), {
+    x: 177,
+    y: 77.5,
+    source: 'inferred-render-bounds',
+  });
+  assert.equal(store.value, '177,77.5');
+}
+
+function testRefreshMotionPivotCacheHandlesTopLeftRotation(): void {
+  const store = { value: '' };
+  const node = {
+    id: '15:22',
+    name: 'Rectangle 31',
+    type: 'RECTANGLE',
+    width: 287,
+    height: 220,
+    getSharedPluginData(namespace: string, key: string): string {
+      return namespace === 'pagx' && key === 'anchor' ? store.value : '';
+    },
+    setSharedPluginData(namespace: string, key: string, value: string): void {
+      if (namespace === 'pagx' && key === 'anchor') {
+        store.value = value;
+      }
+    },
+    animations: {
+      ROTATION: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 0 },
+        tracks: [{
+          keyframeOperation: 'SET' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+            { timelinePosition: 0.499, value: { type: 'FLOAT' as const, value: 180.00000500895632 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  assert.deepEqual(refreshMotionPivotCache(node), {
+    x: 0,
+    y: 0,
+    source: 'rotation-top-left',
+  });
+  assert.equal(store.value, '0,0');
+}
+
+function testMotionDebugDataIncludesPivotSourceAndCachesAnchor(): void {
+  const store = { value: '' };
+  const node = rectangle32ScaleNode({
+    x: 1220.043701171875,
+    y: 3277.31005859375,
+    width: 237.956298828125,
+    height: 205.68994140625,
+  }, store);
+
+  const [debugEntry] = collectMotionDebugData(node) as Array<{
+    transform?: {
+      motionPivot?: {
+        x: number;
+        y: number;
+        source: string;
+      };
+    };
+  }>;
+
+  assert.deepEqual(debugEntry.transform?.motionPivot, {
+    x: 177,
+    y: 77.5,
+    source: 'inferred-render-bounds',
+  });
+  assert.equal(store.value, '177,77.5');
+}
+
 function run(): void {
   testSpringOvershoot();
   testRotationSamplingUsesSpring();
@@ -834,6 +1086,14 @@ function run(): void {
   testFrame8Rectangle27OpacityUsesStyleTimelineOffset();
   testMotionGroupSizeAnimationKeepsEasing();
   testSizeOnlyMatrixAnimationKeepsEasing();
+  testMotionDebugDataIncludesTransformDetails();
+  testScalePivotInfersAndCachesAnchorFromRenderBounds();
+  testScalePivotUsesCachedAnchorAtTimelineStart();
+  testScalePivotRefreshesStaleCacheFromRenderBounds();
+  testRefreshMotionPivotCacheUsesCurrentRenderBounds();
+  testRefreshMotionPivotCacheAllowsSmallTimelineNudge();
+  testRefreshMotionPivotCacheHandlesTopLeftRotation();
+  testMotionDebugDataIncludesPivotSourceAndCachesAnchor();
   console.log('figma-motion tests passed');
 }
 
