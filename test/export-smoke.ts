@@ -369,12 +369,84 @@ async function testStaticExportKeepsRotatedLayerMatrix(): Promise<void> {
   );
 }
 
+async function testSiblingMaskExportsMaskReference(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  const root = {
+    id: '1:1',
+    name: 'Root',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 200,
+    height: 200,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 200, height: 200 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [
+      {
+        id: '1:2',
+        name: 'Mask Shape',
+        type: 'RECTANGLE',
+        visible: true,
+        opacity: 1,
+        blendMode: 'PASS_THROUGH',
+        width: 100,
+        height: 100,
+        x: 20,
+        y: 20,
+        absoluteTransform: [[1, 0, 20], [0, 1, 20]],
+        absoluteBoundingBox: { x: 20, y: 20, width: 100, height: 100 },
+        fills: [{ type: 'SOLID', visible: true, color: { r: 1, g: 1, b: 1 }, opacity: 1 }],
+        strokes: [],
+        effects: [],
+        isMask: true,
+        maskType: 'VECTOR',
+      },
+      {
+        id: '1:3',
+        name: 'Masked Rectangle',
+        type: 'RECTANGLE',
+        visible: true,
+        opacity: 1,
+        blendMode: 'PASS_THROUGH',
+        width: 120,
+        height: 120,
+        x: 40,
+        y: 40,
+        absoluteTransform: [[1, 0, 40], [0, 1, 40]],
+        absoluteBoundingBox: { x: 40, y: 40, width: 120, height: 120 },
+        fills: [{ type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0 }, opacity: 1 }],
+        strokes: [],
+        effects: [],
+      },
+    ],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(root, createExportContext(root));
+  const exportedXml = writePagxXml(document);
+  assert(exportedXml.includes('<Layer name="Mask Shape" id="layer_1_2"'), 'mask layer missing');
+  assert(exportedXml.includes('visible="false"'), 'mask layer should be hidden');
+  assert(exportedXml.includes('<Layer name="Masked Rectangle" id="layer_1_3"'), 'masked layer missing');
+  assert(exportedXml.includes('mask="@layer_1_2"'), 'masked layer should reference mask layer');
+  assert(exportedXml.includes('maskType="contour"'), 'vector mask should export as contour mask');
+}
+
 Promise.all([
   testMotionDataIsExported(),
   testNoMotionDataSkipsAnimations(),
   testRotationMotionUsesInnerGroup(),
   testStaticExportSkipsLayerMatrix(),
   testStaticExportKeepsRotatedLayerMatrix(),
+  testSiblingMaskExportsMaskReference(),
 ]).then(() => {
   console.log('export smoke tests passed');
 });

@@ -98,6 +98,22 @@ function staticLayerMatrixInParent(node: SceneNode, parent: SceneNode | null): s
   return matrix;
 }
 
+type PagxMaskType = 'alpha' | 'luminance' | 'contour';
+
+function isMaskNode(node: SceneNode): node is SceneNode & { isMask: boolean; maskType: MaskType } {
+  return 'isMask' in node && node.isMask;
+}
+
+function mapMaskType(maskType: MaskType): PagxMaskType {
+  if (maskType === 'LUMINANCE') {
+    return 'luminance';
+  }
+  if (maskType === 'VECTOR') {
+    return 'contour';
+  }
+  return 'alpha';
+}
+
 export function textUsesLayerTransform(node: TextNode, parent: SceneNode | null): boolean {
   if (staticLayerMatrixInParent(node, parent)) {
     return true;
@@ -541,9 +557,26 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
 
     const children: PagxLayer[] = [];
     if ('children' in node) {
+      let activeMask: { id: string; type: PagxMaskType } | null = null;
       for (const child of node.children) {
         const mapped = await mapNode(child, node, ctx);
         if (mapped) {
+          if (isMaskNode(child)) {
+            mapped.attrs.visible = false;
+            activeMask = {
+              id: mapped.id,
+              type: mapMaskType(child.maskType),
+            };
+            children.push(mapped);
+            continue;
+          }
+
+          if (activeMask) {
+            mapped.attrs.mask = `@${activeMask.id}`;
+            if (activeMask.type !== 'alpha') {
+              mapped.attrs.maskType = activeMask.type;
+            }
+          }
           children.push(mapped);
         }
       }
