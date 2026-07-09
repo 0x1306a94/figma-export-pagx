@@ -155,6 +155,30 @@ assert(
   'rotated line should export matrix rotation',
 );
 
+const horizontalFlipParent = mockNode({
+  type: 'FRAME',
+  absoluteTransform: [[-1, 0, 880], [0, 1, 0]],
+  absoluteBoundingBox: { x: 0, y: 0, width: 880, height: 1325 },
+});
+const horizontalFlipChild = mockNode({
+  type: 'RECTANGLE',
+  x: 49,
+  y: 159,
+  width: 340,
+  height: 304,
+  absoluteTransform: [[-1, 0, 831], [0, 1, 159]],
+  absoluteBoundingBox: { x: 491, y: 159, width: 340, height: 304 },
+});
+
+assert(
+  nodePositionInParent(horizontalFlipChild, horizontalFlipParent).left === 491,
+  'child of horizontal flipped frame should use visual bbox left',
+);
+assert(
+  nodePositionInParent(horizontalFlipChild, horizontalFlipParent).top === 159,
+  'child of horizontal flipped frame should keep visual bbox top',
+);
+
 const flippedVector = mockNode({
   absoluteTransform: [[-1, 0, 562], [0, -1, 1049]],
   absoluteBoundingBox: { x: 136, y: 0, width: 426, height: 1049 },

@@ -389,6 +389,24 @@ function isZeroTranslation(tx: number, ty: number): boolean {
   return Math.abs(tx) < epsilon && Math.abs(ty) < epsilon;
 }
 
+function parentHasPureAxisFlip(parent: SceneNode): boolean {
+  if (!('absoluteTransform' in parent)) {
+    return false;
+  }
+
+  const transform = parent.absoluteTransform;
+  const a = transform[0][0];
+  const b = transform[1][0];
+  const c = transform[0][1];
+  const d = transform[1][1];
+  const epsilon = 1e-4;
+  return Math.abs(Math.abs(a) - 1) < epsilon
+    && Math.abs(Math.abs(d) - 1) < epsilon
+    && Math.abs(b) < epsilon
+    && Math.abs(c) < epsilon
+    && (a < 0 || d < 0);
+}
+
 export function nodeBoundsInParent(
   node: SceneNode,
   parent: SceneNode,
@@ -411,6 +429,10 @@ export function nodeBoundsInParent(
 function usesBboxForLayout(node: SceneNode, parent: SceneNode): boolean {
   // GROUP 子节点的 node.x/y 常为画布绝对坐标，必须用 AABB 差值得到父级局部位置。
   if (parent.type === 'GROUP') {
+    return true;
+  }
+
+  if (parentHasPureAxisFlip(parent)) {
     return true;
   }
 

@@ -54,11 +54,16 @@ function parentHasPureAxisFlip(parent: SceneNode | null): boolean {
   }
 
   const transform = parent.absoluteTransform;
+  const a = transform[0][0];
+  const b = transform[1][0];
+  const c = transform[0][1];
+  const d = transform[1][1];
   const epsilon = 1e-4;
-  return Math.abs(transform[0][0] + 1) < epsilon
-    && Math.abs(transform[1][1] + 1) < epsilon
-    && Math.abs(transform[1][0]) < epsilon
-    && Math.abs(transform[0][1]) < epsilon;
+  return Math.abs(Math.abs(a) - 1) < epsilon
+    && Math.abs(Math.abs(d) - 1) < epsilon
+    && Math.abs(b) < epsilon
+    && Math.abs(c) < epsilon
+    && (a < 0 || d < 0);
 }
 
 function matrixFromAbsoluteBounds(node: SceneNode, parent: SceneNode): string | undefined {

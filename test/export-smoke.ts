@@ -523,6 +523,55 @@ async function testStaticExportKeepsRotatedLayerMatrix(): Promise<void> {
   );
 }
 
+async function testHorizontalFlippedRootUsesVisualChildPosition(): Promise<void> {
+  (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+    mixed: Symbol('mixed'),
+  };
+
+  const root = {
+    id: '1:1',
+    name: 'Frame7',
+    type: 'FRAME',
+    layoutMode: 'NONE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 880,
+    height: 1325,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[-1, 0, 880], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 880, height: 1325 },
+    fills: [],
+    strokes: [],
+    effects: [],
+    children: [{
+      id: '1:2',
+      name: 'Rectangle 17',
+      type: 'RECTANGLE',
+      visible: true,
+      opacity: 1,
+      blendMode: 'PASS_THROUGH',
+      width: 340,
+      height: 304,
+      x: 49,
+      y: 159,
+      absoluteTransform: [[-1, 0, 831], [0, 1, 159]],
+      absoluteBoundingBox: { x: 491, y: 159, width: 340, height: 304 },
+      fills: [{ type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0 }, opacity: 1 }],
+      strokes: [],
+      effects: [],
+    }],
+  } as unknown as FrameNode;
+
+  const document = await mapFigmaToPagx(root, createExportContext(root));
+  const exportedXml = writePagxXml(document);
+  assert(
+    exportedXml.includes('<Layer name="Rectangle 17" id="layer_1_2" left="491" top="159"'),
+    'child of horizontal flipped root should export visual left/top',
+  );
+}
+
 async function testSiblingMaskExportsMaskReference(): Promise<void> {
   (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
     mixed: Symbol('mixed'),
@@ -602,6 +651,7 @@ Promise.all([
   testScaleMotionInfersPivotFromRenderBounds(),
   testStaticExportSkipsLayerMatrix(),
   testStaticExportKeepsRotatedLayerMatrix(),
+  testHorizontalFlippedRootUsesVisualChildPosition(),
   testSiblingMaskExportsMaskReference(),
 ]).then(() => {
   console.log('export smoke tests passed');
