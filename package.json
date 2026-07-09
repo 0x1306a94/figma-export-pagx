@@ -1,5 +1,5 @@
 {
-  "name": "figma-export-pagx",
+  "name": "figma-motion-export-pagx",
   "version": "1.0.0",
   "description": "Your Figma Plugin",
   "main": "code.js",

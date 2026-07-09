@@ -694,7 +694,7 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
     animations: collectMotionAnimations(root, ctx.layerIdByFigmaId, ctx.motionTargetIdByFigmaId, ctx.diagnostics),
     layers,
     customData: {
-      'data-exported-by': 'figma-export-pagx',
+      'data-exported-by': 'figma-motion-export-pagx',
       'data-figma-root-id': root.id,
     },
   };

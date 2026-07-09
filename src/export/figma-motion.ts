@@ -958,7 +958,7 @@ export function collectMotionDebugData(root: SceneNode): unknown[] {
 }
 
 function logMotionDebugData(root: SceneNode): void {
-  console.log('[figma-export-pagx] motion debug data:', JSON.stringify(collectMotionDebugData(root), null, 2));
+  console.log('[figma-motion-export-pagx] motion debug data:', JSON.stringify(collectMotionDebugData(root), null, 2));
 }
 
 function secondsToFrame(seconds: number): number {

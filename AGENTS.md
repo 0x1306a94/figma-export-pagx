@@ -1,4 +1,4 @@
-# figma-export-pagx
+# figma-motion-export-pagx
 
 Figma 插件：将选中节点静态导出为 PAGX（`.pagx`）。第一版不含动画。
 

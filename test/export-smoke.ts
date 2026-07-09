@@ -19,7 +19,7 @@ const sampleDocument: PagxDocument = {
   resources: [],
   animations: [],
   customData: {
-    'data-exported-by': 'figma-export-pagx',
+    'data-exported-by': 'figma-motion-export-pagx',
     'data-figma-root-id': '1:2',
   },
   layers: [
