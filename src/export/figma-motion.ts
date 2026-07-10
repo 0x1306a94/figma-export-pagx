@@ -2522,6 +2522,173 @@ export function readTransformSamplesForTest(
   return readTransformSamples(node, parent, diagnostics);
 }
 
+export type PagMotionFrame = {
+  frame: number;
+  /** Parent-space position of the layer transform anchor. */
+  positionX: number;
+  positionY: number;
+  /** Transform scale only — Figma WIDTH/HEIGHT is NOT folded in here. */
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+  opacity: number;
+  /** Layout content size at this frame (for Shape size animation). */
+  contentWidth: number;
+  contentHeight: number;
+};
+
+export type PagMotionResult = {
+  frames: PagMotionFrame[];
+  durationFrames: number;
+  /**
+   * True when Figma WIDTH/HEIGHT is animated.
+   * PAGX maps this to matrix scale from the layer origin (top-left);
+   * PAG should animate Shape size with layer anchor at (0,0), not center scale.
+   */
+  sizeAnimated: boolean;
+};
+
+/**
+ * Bake motion transform/opacity/size samples for PAG export.
+ * - Transform scale/rotation/translation → Transform2D
+ * - Figma size (WIDTH/HEIGHT) → contentWidth/Height (caller animates Shape.size)
+ * - When sizeAnimated, position is top-left based (anchor should be 0,0)
+ */
+export function collectPagMotionFrames(
+  node: SceneNode,
+  parent: SceneNode | null,
+  width: number,
+  height: number,
+  layoutLeft: number,
+  layoutTop: number,
+  diagnostics: Diagnostic[],
+): PagMotionResult | null {
+  if (!isMotionNode(node)) {
+    return null;
+  }
+
+  const pivot = motionPivotForExport(node, width, height);
+  const transformSamples = readTransformSamples(node, parent, diagnostics);
+  const sizeSamples = readSizeSamples(node, diagnostics);
+  const hasTransform = hasTransformAnimation(transformSamples);
+  const sizeAnimated = hasSizeAnimation(sizeSamples);
+  const opacityBinding = node.animations.OPACITY;
+  const opacitySamples = opacityBinding
+    ? collectFloatSamples(opacityBinding, undefined, motionStyleTimelineOffset(node, 'OPACITY'))
+    : [];
+  const hasOpacity = opacitySamples.length > 0 && isAnimatedFloat(opacitySamples);
+
+  if (!hasTransform && !sizeAnimated && !hasOpacity) {
+    return null;
+  }
+
+  const bakePerFrame = shouldBakeMatrixPerFrame(node, transformSamples, sizeSamples) || hasOpacity;
+  const sampleFloat = bakePerFrame ? sampleFloatAtEased : sampleFloatAt;
+  const endSeconds = Math.max(
+    maxTransformKeyframeSeconds(transformSamples, sizeSamples),
+    opacitySamples.length > 0 ? opacitySamples[opacitySamples.length - 1].time : 0,
+  );
+  const durationFrames = Math.max(1, Math.ceil(endSeconds * MOTION_FRAME_RATE));
+  const sampleTimes = bakePerFrame
+    ? Array.from({ length: durationFrames + 1 }, (_, frame) => frame / MOTION_FRAME_RATE)
+    : mergeSampleTimes([
+      transformSamples.sampleTimes,
+      sizeSamples.sampleTimes,
+      collectSampleTimes(opacitySamples),
+    ]);
+
+  const rotationBinding = node.animations.ROTATION;
+  const rotationBase = resolveRotationBase();
+  const rotationDirection = resolveRotationDirection(node);
+  const rotationPresetType = resolveRotationPresetType(node);
+  const usesSetRotation = hasSetRotationAnimation(node);
+  const setRotationOrigin = usesSetRotation && rotationBinding
+    ? readSetRotationOrigin(rotationBinding)
+    : null;
+  const baseOpacity = 'opacity' in node ? node.opacity : 1;
+
+  const frames: PagMotionFrame[] = [];
+
+  for (const time of sampleTimes) {
+    let translationX = 0;
+    let translationY = 0;
+    if (transformSamples.translationXY.length > 0) {
+      const vector = sampleVectorAt(transformSamples.translationXY, time);
+      translationX = vector.x;
+      translationY = vector.y;
+    } else {
+      if (transformSamples.translationX.length > 0) {
+        translationX = sampleFloat(transformSamples.translationX, time);
+      }
+      if (transformSamples.translationY.length > 0) {
+        translationY = sampleFloat(transformSamples.translationY, time);
+      }
+    }
+
+    let scaleX = 1;
+    let scaleY = 1;
+    if (transformSamples.scaleXY.length > 0) {
+      const vector = sampleVectorAt(transformSamples.scaleXY, time);
+      scaleX = vector.x;
+      scaleY = vector.y;
+    } else {
+      scaleX = sampleFloat(transformSamples.scaleX, time);
+      scaleY = sampleFloat(transformSamples.scaleY, time);
+    }
+    // Intentionally NOT folding WIDTH/HEIGHT into scale — that caused center-scale.
+    // Size is exposed as contentWidth/Height for Shape.size animation.
+
+    let contentWidth = width;
+    let contentHeight = height;
+    if (sizeAnimated) {
+      if (sizeSamples.width.length > 0) {
+        contentWidth = sampleFloat(sizeSamples.width, time);
+      }
+      if (sizeSamples.height.length > 0) {
+        contentHeight = sampleFloat(sizeSamples.height, time);
+      }
+    }
+
+    let rotationSample = sampleFloat(transformSamples.rotation, time);
+    if (setRotationOrigin !== null) {
+      rotationSample -= setRotationOrigin;
+    }
+    const rotation = figmaRotationDegreesToPagx(
+      applyRotationDirection(rotationSample, rotationDirection, rotationBase),
+      rotationPresetType,
+      rotationDirection,
+      usesSetRotation,
+    );
+
+    const opacity = hasOpacity
+      ? sampleFloat(opacitySamples, time)
+      : baseOpacity;
+
+    // Size anim: top-left origin (matches PAGX matrix scale-from-origin).
+    // Otherwise: center pivot (matches rotation/scale transform group).
+    const positionX = sizeAnimated
+      ? layoutLeft + translationX
+      : layoutLeft + pivot.x + translationX;
+    const positionY = sizeAnimated
+      ? layoutTop + translationY
+      : layoutTop + pivot.y + translationY;
+
+    frames.push({
+      frame: Math.round(time * MOTION_FRAME_RATE),
+      positionX,
+      positionY,
+      scaleX,
+      scaleY,
+      rotation,
+      opacity,
+      contentWidth,
+      contentHeight,
+    });
+  }
+
+  return { frames, durationFrames, sizeAnimated };
+}
+
 export function collectMotionAnimations(
   root: SceneNode,
   layerIdByFigmaId: Map<string, string>,

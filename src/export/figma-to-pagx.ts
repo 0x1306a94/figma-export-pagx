@@ -31,6 +31,7 @@ import {
   motionPivotForExport,
   needsMotionTransformGroup,
 } from './figma-motion';
+import { exportLayerName } from './solid-marker';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,
@@ -199,7 +200,7 @@ function wrapContentsInMotionGroup(
     kind: 'group',
     attrs: {
       id: groupId,
-      name: `${node.name} Motion`,
+      name: `${exportLayerName(node.name)} Motion`,
       anchor: pivotPosition,
       position: pivotPosition,
       width,
@@ -287,7 +288,7 @@ async function mapTextNode(
   if (useTextBox) {
     return {
       id: layerId,
-      name: node.name,
+      name: exportLayerName(node.name),
       attrs: textLayerAttrs(node, parent),
       customData: { 'data-figma-id': node.id },
       contents: wrapTextContentsInTextBox(contents, node),
@@ -299,7 +300,7 @@ async function mapTextNode(
 
   return {
     id: layerId,
-    name: node.name,
+    name: exportLayerName(node.name),
     attrs: textLayerAttrs(node, parent),
     customData: { 'data-figma-id': node.id },
     contents,
@@ -591,7 +592,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
 
     return {
       id: layerId,
-      name: node.name,
+      name: exportLayerName(node.name),
       attrs,
       customData: { 'data-figma-id': node.id },
       contents,
@@ -624,7 +625,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
 
     return {
       id: layerId,
-      name: node.name,
+      name: exportLayerName(node.name),
       attrs: layerBaseAttrs(node, parent),
       customData: { 'data-figma-id': node.id },
       contents,

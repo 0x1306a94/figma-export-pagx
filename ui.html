@@ -26,6 +26,12 @@
       margin-bottom: 8px;
     }
     #export:disabled { opacity: 0.6; cursor: default; }
+    #export-pag {
+      background: #111;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    #export-pag:disabled { opacity: 0.6; cursor: default; }
     #refresh-motion-anchor {
       background: #0d9488;
       color: #fff;
@@ -110,14 +116,15 @@
   </style>
 </head>
 <body>
-  <h2>导出 PAGX</h2>
-  <p>选择一个 Frame 或图层作为 root，然后导出为 .pagx 文件。</p>
+  <h2>导出 PAGX / PAG</h2>
+  <p>选择一个 Frame 或图层作为 root，导出为 .pagx 或 .pag。</p>
   <div id="motion-warning">
     如果存在手动调整过锚点的节点，请先将 Figma Motion 时间线拖到该节点动画起始点稍后，选中该节点并点击刷新锚点缓存。全部刷新后，再回到起始位置选中 Frame 导出。
   </div>
   <button id="refresh-motion-anchor">刷新锚点缓存</button>
   <div id="refresh-status"></div>
   <button id="export">导出 PAGX</button>
+  <button id="export-pag">导出 PAG</button>
   <button id="cancel">关闭</button>
   <div id="meta"></div>
   <div id="error"></div>
@@ -129,6 +136,7 @@
   </div>
   <script>
     const exportButton = document.getElementById('export');
+    const exportPagButton = document.getElementById('export-pag');
     const refreshMotionAnchorButton = document.getElementById('refresh-motion-anchor');
     const cancelButton = document.getElementById('cancel');
     const metaEl = document.getElementById('meta');
@@ -151,6 +159,13 @@
     function showRefreshStatus(message) {
       refreshStatusEl.style.display = 'block';
       refreshStatusEl.textContent = message;
+    }
+
+    function setExportBusy(busy) {
+      exportButton.disabled = busy;
+      exportPagButton.disabled = busy;
+      exportButton.textContent = busy ? '导出中...' : '导出 PAGX';
+      exportPagButton.textContent = busy ? '导出中...' : '导出 PAG';
     }
 
     function renderDiagnostics(items) {
@@ -187,11 +202,26 @@
       URL.revokeObjectURL(url);
     }
 
+    function downloadPag(bytes, fileName) {
+      const blob = new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
     exportButton.onclick = () => {
       clearError();
-      exportButton.disabled = true;
-      exportButton.textContent = '导出中...';
+      setExportBusy(true);
       parent.postMessage({ pluginMessage: { type: 'export-pagx' } }, '*');
+    };
+
+    exportPagButton.onclick = () => {
+      clearError();
+      setExportBusy(true);
+      parent.postMessage({ pluginMessage: { type: 'export-pag' } }, '*');
     };
 
     refreshMotionAnchorButton.onclick = () => {
@@ -209,8 +239,7 @@
       const msg = event.data.pluginMessage;
       if (!msg) return;
 
-      exportButton.disabled = false;
-      exportButton.textContent = '导出 PAGX';
+      setExportBusy(false);
       refreshMotionAnchorButton.disabled = false;
       refreshMotionAnchorButton.textContent = '刷新锚点缓存';
 
@@ -225,6 +254,15 @@
         metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个`;
         renderDiagnostics(msg.diagnostics);
         downloadPagx(msg.xml, msg.fileName);
+        return;
+      }
+
+      if (msg.type === 'export-pag-result') {
+        clearError();
+        metaEl.style.display = 'block';
+        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个（.pag ${msg.bytes.length} bytes）`;
+        renderDiagnostics(msg.diagnostics);
+        downloadPag(msg.bytes, msg.fileName);
         return;
       }
 

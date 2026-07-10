@@ -10,6 +10,8 @@ const AXIS_TOLERANCE = 0.01;
 const ELLIPSE_POINT_TOLERANCE = 1.0;
 const ELLIPSE_CP_TOLERANCE = 2.0;
 
+export type SvgParsedPath = ParsedPath;
+
 export function parseSvgPath(data: string): ParsedPath {
   const verbs: ParsedPath['verbs'] = [];
   const points: Point[] = [];
@@ -318,3 +320,11 @@ export type PagxShapeElement =
   | { kind: 'rectangle'; attrs: Record<string, string | number | boolean> }
   | { kind: 'ellipse'; attrs: Record<string, string | number | boolean> }
   | { kind: 'path'; attrs: Record<string, string | number | boolean> };
+
+/** Convert SVG path data to PAG PathData verbs/points. */
+export function svgPathToPagPathData(data: string): {
+  verbs: Array<'move' | 'line' | 'cubic' | 'close'>;
+  points: Array<{ x: number; y: number }>;
+} {
+  return parseSvgPath(data);
+}

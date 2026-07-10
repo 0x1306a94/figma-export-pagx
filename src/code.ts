@@ -1,10 +1,11 @@
 figma.showUI(__html__, { width: 360, height: 560 });
 
-import { exportPagx } from './export';
+import { exportPagx, exportPag } from './export';
 import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
 
 type PluginMessage =
   | { type: 'export-pagx' }
+  | { type: 'export-pag' }
   | { type: 'refresh-motion-anchor' }
   | { type: 'cancel' };
 
@@ -62,7 +63,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
     return;
   }
 
-  if (msg.type !== 'export-pagx') {
+  if (msg.type !== 'export-pagx' && msg.type !== 'export-pag') {
     return;
   }
 
@@ -78,6 +79,20 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   const root = selection[0];
 
   try {
+    if (msg.type === 'export-pag') {
+      const result = await exportPag(root);
+      figma.ui.postMessage({
+        type: 'export-pag-result',
+        bytes: Array.from(result.bytes),
+        diagnostics: result.diagnostics,
+        fileName: `${sanitizeFileName(root.name)}.pag`,
+        width: result.width,
+        height: result.height,
+        nodeCount: result.nodeCount,
+      });
+      return;
+    }
+
     const result = await exportPagx(root);
     figma.ui.postMessage({
       type: 'export-result',

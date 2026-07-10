@@ -1,0 +1,1033 @@
+/** Figma SceneNode → PagFile IR (shared reader/motion, PAG-specific mapping). */
+
+import type { Diagnostic } from '../types';
+import { roundDimension } from '../color';
+import {
+  addDiagnostic,
+  geometryPathData,
+  hasImageFill,
+  isContainerNode,
+  isGeometryNode,
+  nodePositionInParent,
+  readCornerRadius,
+} from '../figma-reader';
+import {
+  MOTION_FRAME_RATE,
+  collectPagMotionFrames,
+  isMotionNode,
+  motionLayoutPositionForExport,
+  motionLayoutSizeForExport,
+  motionPivotForExport,
+  type PagMotionResult,
+} from '../figma-motion';
+import { canonicalizePathData, svgPathToPagPathData } from '../path-detect';
+import { exportLayerName, parseSolidMarker } from '../solid-marker';
+import { encodePagFile } from './encode/encode-file';
+import { makeEllipse, makeRectangle, makeSolidFill, makeSolidStroke } from './encode/encode-shapes';
+import {
+  BlendMode,
+  ColorBlack,
+  ColorWhite,
+  DEFAULT_RATIO,
+  KeyframeInterpolationType,
+  LayerType,
+  MaskMode,
+  OPAQUE,
+  PagFile,
+  PagImageBytes,
+  PagKeyframe,
+  PagLayer,
+  PagMaskData,
+  PagPathData,
+  PagPoint,
+  PagProperty,
+  PagShapeElement,
+  PagShapeLayer,
+  PagTextDocument,
+  PagTransform2D,
+  PagVectorComposition,
+  ParagraphJustification,
+  PathVerb,
+  staticProperty,
+  defaultTransform2D,
+} from './types';
+
+export type PagExportContext = {
+  diagnostics: Diagnostic[];
+  nodeCount: number;
+  nextLayerId: number;
+  nextCompositionId: number;
+  nextImageId: number;
+  nextMaskId: number;
+  compositions: PagVectorComposition[];
+  images: PagImageBytes[];
+  fonts: Array<{ fontFamily: string; fontStyle: string }>;
+  fontKeys: Set<string>;
+  durationFrames: number;
+};
+
+export type PagExportResult = {
+  bytes: Uint8Array;
+  file: PagFile;
+  diagnostics: Diagnostic[];
+  nodeCount: number;
+  width: number;
+  height: number;
+};
+
+function createPagExportContext(): PagExportContext {
+  return {
+    diagnostics: [],
+    nodeCount: 0,
+    nextLayerId: 1,
+    nextCompositionId: 1,
+    nextImageId: 1,
+    nextMaskId: 1,
+    compositions: [],
+    images: [],
+    fonts: [],
+    fontKeys: new Set(),
+    durationFrames: 1,
+  };
+}
+
+function allocLayerId(ctx: PagExportContext): number {
+  const id = ctx.nextLayerId;
+  ctx.nextLayerId += 1;
+  return id;
+}
+
+function allocCompositionId(ctx: PagExportContext): number {
+  const id = ctx.nextCompositionId;
+  ctx.nextCompositionId += 1;
+  return id;
+}
+
+function allocImageId(ctx: PagExportContext): number {
+  const id = ctx.nextImageId;
+  ctx.nextImageId += 1;
+  return id;
+}
+
+function allocMaskId(ctx: PagExportContext): number {
+  const id = ctx.nextMaskId;
+  ctx.nextMaskId += 1;
+  return id;
+}
+
+function opacityToPag(opacity: number): number {
+  return Math.round(Math.max(0, Math.min(1, opacity)) * 255);
+}
+
+function parseHexColor(hex: string): { color: { red: number; green: number; blue: number }; opacity: number } {
+  const raw = hex.replace('#', '');
+  if (raw.length === 6 || raw.length === 8) {
+    const red = Number.parseInt(raw.slice(0, 2), 16);
+    const green = Number.parseInt(raw.slice(2, 4), 16);
+    const blue = Number.parseInt(raw.slice(4, 6), 16);
+    const opacity = raw.length === 8 ? Number.parseInt(raw.slice(6, 8), 16) : 255;
+    return { color: { red, green, blue }, opacity };
+  }
+  return { color: ColorBlack, opacity: OPAQUE };
+}
+
+function solidFromPaint(paint: Paint): { color: { red: number; green: number; blue: number }; opacity: number } | null {
+  if (paint.type !== 'SOLID' || paint.visible === false) {
+    return null;
+  }
+  const alpha = paint.opacity ?? 1;
+  return {
+    color: {
+      red: Math.round(paint.color.r * 255),
+      green: Math.round(paint.color.g * 255),
+      blue: Math.round(paint.color.b * 255),
+    },
+    opacity: opacityToPag(alpha),
+  };
+}
+
+function svgToPagPath(data: string): PagPathData {
+  const parsed = svgPathToPagPathData(data);
+  const verbs: PathVerb[] = [];
+  for (const verb of parsed.verbs) {
+    if (verb === 'move') verbs.push(PathVerb.MoveTo);
+    else if (verb === 'line') verbs.push(PathVerb.LineTo);
+    else if (verb === 'cubic') verbs.push(PathVerb.CurveTo);
+    else verbs.push(PathVerb.Close);
+  }
+  return { verbs, points: parsed.points };
+}
+
+function resolvedSize(node: SceneNode): { width: number; height: number } {
+  const motionSize = motionLayoutSizeForExport(node);
+  const width = motionSize?.width
+    ?? ('width' in node ? roundDimension(node.width) : 0);
+  const height = motionSize?.height
+    ?? ('height' in node ? roundDimension(node.height) : 0);
+  return { width, height };
+}
+
+function layoutLeftTop(node: SceneNode, parent: SceneNode | null): { left: number; top: number } {
+  const motionPos = motionLayoutPositionForExport(node, parent);
+  if (typeof motionPos.left === 'number' && typeof motionPos.top === 'number') {
+    return { left: Number(motionPos.left), top: Number(motionPos.top) };
+  }
+  const pos = nodePositionInParent(node, parent);
+  return { left: pos.left ?? 0, top: pos.top ?? 0 };
+}
+
+function keyframesFromValues<T>(
+  frames: Array<{ frame: number; value: T }>,
+): PagProperty<T> {
+  if (frames.length === 0) {
+    throw new Error('keyframesFromValues requires at least one frame');
+  }
+  if (frames.length === 1) {
+    return staticProperty(frames[0].value);
+  }
+  const keyframes: PagKeyframe<T>[] = [];
+  for (let i = 0; i < frames.length - 1; i += 1) {
+    keyframes.push({
+      startTime: frames[i].frame,
+      endTime: frames[i + 1].frame,
+      startValue: frames[i].value,
+      endValue: frames[i + 1].value,
+      interpolationType: KeyframeInterpolationType.Linear,
+    });
+  }
+  return { animatable: true, keyframes };
+}
+
+function buildTransform(
+  node: SceneNode,
+  parent: SceneNode | null,
+  width: number,
+  height: number,
+  ctx: PagExportContext,
+  motion: PagMotionResult | null,
+): PagTransform2D {
+  const { left, top } = parent ? layoutLeftTop(node, parent) : { left: 0, top: 0 };
+  const pivot = motionPivotForExport(node, width, height);
+  const sizeAnimated = motion?.sizeAnimated ?? false;
+  const staticPosition = sizeAnimated
+    ? { x: left, y: top }
+    : { x: left + pivot.x, y: top + pivot.y };
+  const staticAnchor = sizeAnimated ? { x: 0, y: 0 } : { x: pivot.x, y: pivot.y };
+  const staticOpacity = opacityToPag('opacity' in node ? node.opacity : 1);
+
+  if (!motion || motion.frames.length === 0) {
+    return defaultTransform2D({
+      anchorPoint: staticAnchor,
+      position: staticPosition,
+      opacity: staticOpacity,
+    });
+  }
+
+  ctx.durationFrames = Math.max(ctx.durationFrames, motion.durationFrames);
+
+  return {
+    anchorPoint: staticProperty(staticAnchor),
+    position: keyframesFromValues(
+      motion.frames.map((frame) => ({
+        frame: frame.frame,
+        value: { x: frame.positionX, y: frame.positionY },
+      })),
+    ),
+    scale: keyframesFromValues(
+      motion.frames.map((frame) => ({
+        frame: frame.frame,
+        value: { x: frame.scaleX, y: frame.scaleY },
+      })),
+    ),
+    rotation: keyframesFromValues(
+      motion.frames.map((frame) => ({
+        frame: frame.frame,
+        value: frame.rotation,
+      })),
+    ),
+    opacity: keyframesFromValues(
+      motion.frames.map((frame) => ({
+        frame: frame.frame,
+        value: opacityToPag(frame.opacity),
+      })),
+    ),
+  };
+}
+
+function readMotionForNode(
+  node: SceneNode,
+  parent: SceneNode | null,
+  width: number,
+  height: number,
+  ctx: PagExportContext,
+): PagMotionResult | null {
+  const { left, top } = parent ? layoutLeftTop(node, parent) : { left: 0, top: 0 };
+  const motion = collectPagMotionFrames(
+    node,
+    parent,
+    width,
+    height,
+    left,
+    top,
+    ctx.diagnostics,
+  );
+  if (motion) {
+    ctx.durationFrames = Math.max(ctx.durationFrames, motion.durationFrames);
+  }
+  return motion;
+}
+
+function applySizeAnimationToContents(
+  contents: PagShapeElement[],
+  motion: PagMotionResult,
+): PagShapeElement[] {
+  if (!motion.sizeAnimated) {
+    return contents;
+  }
+
+  const sizeProperty = keyframesFromValues(
+    motion.frames.map((frame) => ({
+      frame: frame.frame,
+      value: { x: frame.contentWidth, y: frame.contentHeight },
+    })),
+  );
+  const positionProperty = keyframesFromValues(
+    motion.frames.map((frame) => ({
+      frame: frame.frame,
+      value: { x: frame.contentWidth / 2, y: frame.contentHeight / 2 },
+    })),
+  );
+
+  return contents.map((element) => {
+    if (element.kind === 'rectangle') {
+      return {
+        ...element,
+        size: sizeProperty,
+        position: positionProperty,
+      };
+    }
+    if (element.kind === 'ellipse') {
+      return {
+        ...element,
+        size: sizeProperty,
+        position: positionProperty,
+      };
+    }
+    if (element.kind === 'path') {
+      // Path has no size property; fall back to layer-origin scale like PAGX matrix.
+      // Caller should also set Transform2D.scale from content size ratios when needed.
+      return element;
+    }
+    return element;
+  });
+}
+
+/** When path + size anim: fold size into Transform2D.scale from top-left (PAGX matrix behavior). */
+function scaleFromSizeFrames(motion: PagMotionResult, baseWidth: number, baseHeight: number): PagTransform2D['scale'] {
+  return keyframesFromValues(
+    motion.frames.map((frame) => ({
+      frame: frame.frame,
+      value: {
+        x: baseWidth > 0 ? frame.contentWidth / baseWidth : 1,
+        y: baseHeight > 0 ? frame.contentHeight / baseHeight : 1,
+      },
+    })),
+  );
+}
+
+function layerBase(
+  node: SceneNode,
+  parent: SceneNode | null,
+  width: number,
+  height: number,
+  ctx: PagExportContext,
+  motion: PagMotionResult | null = null,
+  nameOverride?: string,
+): Omit<PagShapeLayer, 'type' | 'contents'> {
+  const resolvedMotion = motion ?? readMotionForNode(node, parent, width, height, ctx);
+  return {
+    id: allocLayerId(ctx),
+    name: nameOverride ?? exportLayerName(node.name),
+    isActive: !('visible' in node) || node.visible !== false,
+    autoOrientation: false,
+    parentId: null,
+    stretch: { ...DEFAULT_RATIO },
+    startTime: 0,
+    duration: Math.max(1, ctx.durationFrames),
+    blendMode: BlendMode.Normal,
+    trackMatteType: 0,
+    transform: buildTransform(node, parent, width, height, ctx, resolvedMotion),
+    masks: [],
+  };
+}
+
+function shapeContentsFromNode(
+  node: SceneNode,
+  ctx: PagExportContext,
+): PagShapeElement[] {
+  const contents: PagShapeElement[] = [];
+  const size = resolvedSize(node);
+  const nodeId = node.id;
+
+  if (node.type === 'RECTANGLE') {
+    const roundness = readCornerRadius(node, nodeId, ctx.diagnostics);
+    contents.push(...makeRectangle(size.width, size.height, roundness));
+  } else if (node.type === 'ELLIPSE') {
+    contents.push(...makeEllipse(size.width, size.height));
+  } else if (
+    node.type === 'VECTOR'
+    || node.type === 'BOOLEAN_OPERATION'
+    || node.type === 'STAR'
+    || node.type === 'POLYGON'
+    || node.type === 'LINE'
+  ) {
+    const pathData = geometryPathData(node);
+    if (!pathData) {
+      addDiagnostic(ctx.diagnostics, 'warning', 'EMPTY_PATH', '节点缺少可导出的路径数据', nodeId);
+    } else {
+      const shape = canonicalizePathData(pathData);
+      if (shape.kind === 'rectangle') {
+        contents.push(...makeRectangle(shape.width, shape.height, shape.roundness ?? 0));
+      } else if (shape.kind === 'ellipse') {
+        contents.push(...makeEllipse(shape.width, shape.height));
+      } else {
+        contents.push({
+          kind: 'path',
+          shapePath: staticProperty(svgToPagPath(shape.data)),
+        });
+      }
+    }
+  } else if (isContainerNode(node) && 'width' in node && 'height' in node) {
+    const fills = 'fills' in node ? node.fills : [];
+    const strokes = 'strokes' in node ? node.strokes : [];
+    const hasPaint = (Array.isArray(fills) && fills.length > 0)
+      || (Array.isArray(strokes) && strokes.length > 0);
+    if (hasPaint) {
+      contents.push(...makeRectangle(size.width, size.height));
+    }
+  }
+
+  if ('fills' in node && Array.isArray(node.fills)) {
+    for (const paint of node.fills) {
+      const solid = solidFromPaint(paint);
+      if (solid) {
+        contents.push(makeSolidFill(solid.color, solid.opacity));
+      } else if (paint.type !== 'IMAGE' && paint.visible !== false) {
+        addDiagnostic(
+          ctx.diagnostics,
+          'warning',
+          'UNSUPPORTED_PAINT',
+          `PAG 导出暂仅支持纯色填充，已跳过 ${paint.type}`,
+          nodeId,
+        );
+      }
+    }
+  }
+
+  if ('strokes' in node && 'strokeWeight' in node && Array.isArray(node.strokes)) {
+    const weight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
+    if (weight > 0) {
+      for (const paint of node.strokes) {
+        const solid = solidFromPaint(paint);
+        if (solid) {
+          contents.push(makeSolidStroke(solid.color, roundDimension(weight), solid.opacity));
+        }
+      }
+    }
+  }
+
+  return contents;
+}
+
+function registerFont(ctx: PagExportContext, fontFamily: string, fontStyle: string): void {
+  const key = `${fontFamily}|${fontStyle}`;
+  if (ctx.fontKeys.has(key)) {
+    return;
+  }
+  ctx.fontKeys.add(key);
+  ctx.fonts.push({ fontFamily, fontStyle });
+}
+
+function mapTextLayer(
+  node: TextNode,
+  parent: SceneNode | null,
+  ctx: PagExportContext,
+): PagLayer {
+  ctx.nodeCount += 1;
+  const size = resolvedSize(node);
+  const base = layerBase(node, parent, size.width, size.height, ctx);
+  const fontFamily = node.fontName === figma.mixed ? 'Inter' : node.fontName.family;
+  const fontStyle = node.fontName === figma.mixed ? 'Regular' : (node.fontName.style || 'Regular');
+  const fontSize = node.fontSize === figma.mixed ? 12 : roundDimension(node.fontSize as number);
+  registerFont(ctx, fontFamily, fontStyle);
+
+  let fillColor = ColorBlack;
+  let fillOpacity = OPAQUE;
+  if (Array.isArray(node.fills)) {
+    for (const paint of node.fills) {
+      const solid = solidFromPaint(paint);
+      if (solid) {
+        fillColor = solid.color;
+        fillOpacity = solid.opacity;
+        break;
+      }
+    }
+  }
+
+  const sourceText: PagTextDocument = {
+    applyFill: true,
+    applyStroke: false,
+    boxText: false,
+    fauxBold: false,
+    fauxItalic: false,
+    strokeOverFill: true,
+    baselineShift: 0,
+    firstBaseLine: 0,
+    boxTextPos: { x: 0, y: 0 },
+    boxTextSize: { x: 0, y: 0 },
+    fillColor,
+    fontSize,
+    strokeColor: ColorBlack,
+    strokeWidth: 1,
+    text: node.characters,
+    justification: ParagraphJustification.LeftJustify,
+    leading: 0,
+    tracking: 0,
+    fontFamily,
+    fontStyle,
+  };
+
+  // Text color opacity goes into layer opacity if not already animated
+  if (fillOpacity < OPAQUE && base.transform.opacity.animatable === false) {
+    const layerOpacity = Math.round((base.transform.opacity.value / 255) * (fillOpacity / 255) * 255);
+    base.transform.opacity = staticProperty(layerOpacity);
+  }
+
+  return {
+    ...base,
+    type: LayerType.Text,
+    sourceText,
+  };
+}
+
+async function mapImageLayer(
+  node: SceneNode & MinimalFillsMixin & ExportMixin,
+  parent: SceneNode | null,
+  ctx: PagExportContext,
+): Promise<PagLayer | null> {
+  if (!hasImageFill(node.fills) || node.fills === figma.mixed || !Array.isArray(node.fills)) {
+    return null;
+  }
+
+  const imagePaint = node.fills.find((paint) => paint.type === 'IMAGE' && paint.visible !== false);
+  if (!imagePaint || imagePaint.type !== 'IMAGE') {
+    return null;
+  }
+
+  try {
+    const bytes = await node.exportAsync({
+      format: 'PNG',
+      constraint: { type: 'SCALE', value: 1 },
+    });
+    const size = resolvedSize(node);
+    const imageId = allocImageId(ctx);
+    ctx.images.push({
+      id: imageId,
+      fileBytes: bytes,
+      width: Math.max(1, Math.round(size.width)),
+      height: Math.max(1, Math.round(size.height)),
+      scaleFactor: 1,
+      anchorX: 0,
+      anchorY: 0,
+    });
+
+    ctx.nodeCount += 1;
+    const base = layerBase(node, parent, size.width, size.height, ctx);
+    return {
+      ...base,
+      type: LayerType.Image,
+      imageId,
+    };
+  } catch (error) {
+    addDiagnostic(
+      ctx.diagnostics,
+      'warning',
+      'IMAGE_EXPORT_FAILED',
+      `图片导出失败: ${error instanceof Error ? error.message : String(error)}`,
+      node.id,
+    );
+    return null;
+  }
+}
+
+function maskPathFromNode(node: SceneNode, ctx: PagExportContext): PagPathData | null {
+  const size = resolvedSize(node);
+  if (node.type === 'RECTANGLE') {
+    const w = size.width;
+    const h = size.height;
+    return {
+      verbs: [PathVerb.MoveTo, PathVerb.LineTo, PathVerb.LineTo, PathVerb.LineTo, PathVerb.Close],
+      points: [
+        { x: 0, y: 0 },
+        { x: w, y: 0 },
+        { x: w, y: h },
+        { x: 0, y: h },
+      ],
+    };
+  }
+  if (node.type === 'ELLIPSE') {
+    // Approximate ellipse as path via geometry if available
+    const pathData = 'fillGeometry' in node ? geometryPathData(node as GeometryMixin) : '';
+    if (pathData) {
+      return svgToPagPath(pathData);
+    }
+  }
+  if ('fillGeometry' in node || 'strokeGeometry' in node) {
+    const pathData = geometryPathData(node as GeometryMixin);
+    if (pathData) {
+      return svgToPagPath(pathData);
+    }
+  }
+  addDiagnostic(ctx.diagnostics, 'warning', 'MASK_PATH_EMPTY', '遮罩节点无可用路径', node.id);
+  return null;
+}
+
+function isMaskNode(node: SceneNode): node is SceneNode & { isMask: boolean; maskType: MaskType } {
+  return 'isMask' in node && Boolean((node as { isMask?: boolean }).isMask);
+}
+
+function visiblePaints(paints: readonly Paint[] | PluginAPI['mixed']): Paint[] {
+  if (!Array.isArray(paints)) {
+    return [];
+  }
+  return paints.filter((paint) => paint.visible !== false);
+}
+
+function solidEligibleGeometry(node: SceneNode): { width: number; height: number } | null {
+  const size = resolvedSize(node);
+  if (node.type === 'RECTANGLE') {
+    return size;
+  }
+  if (
+    node.type === 'VECTOR'
+    || node.type === 'BOOLEAN_OPERATION'
+    || node.type === 'STAR'
+    || node.type === 'POLYGON'
+  ) {
+    const pathData = geometryPathData(node);
+    if (!pathData) {
+      return null;
+    }
+    const shape = canonicalizePathData(pathData);
+    if (shape.kind === 'rectangle' && !(shape.roundness && shape.roundness > 0)) {
+      return { width: shape.width, height: shape.height };
+    }
+  }
+  return null;
+}
+
+function assertSolidEligible(node: SceneNode, exportName: string): {
+  width: number;
+  height: number;
+  solidColor: { red: number; green: number; blue: number };
+  fillOpacity: number;
+} {
+  const label = exportName || node.name;
+  const geometry = solidEligibleGeometry(node);
+  if (!geometry || geometry.width <= 0 || geometry.height <= 0) {
+    throw new Error(
+      `#solid 图层「${label}」必须是轴对齐直角矩形（无圆角），当前类型=${node.type}`,
+    );
+  }
+
+  if (node.type === 'RECTANGLE') {
+    const radius = readCornerRadius(node, node.id, []);
+    if (radius > 0) {
+      throw new Error(`#solid 图层「${label}」不能有圆角（当前 radius=${radius}）`);
+    }
+  }
+
+  const fills = visiblePaints('fills' in node ? node.fills : []);
+  if (fills.length !== 1) {
+    throw new Error(`#solid 图层「${label}」需要恰好 1 个可见填充（当前 ${fills.length} 个）`);
+  }
+  const solid = solidFromPaint(fills[0]);
+  if (!solid) {
+    throw new Error(`#solid 图层「${label}」填充必须是纯色（不能是渐变/图片）`);
+  }
+
+  const strokes = visiblePaints('strokes' in node ? node.strokes : []);
+  const strokeWeight = 'strokeWeight' in node && typeof node.strokeWeight === 'number'
+    ? node.strokeWeight
+    : 0;
+  if (strokes.length > 0 && strokeWeight > 0) {
+    throw new Error(`#solid 图层「${label}」不能有描边`);
+  }
+
+  if (isMotionNode(node)) {
+    const widthBinding = node.animations.WIDTH;
+    const heightBinding = node.animations.HEIGHT;
+    const hasSizeKeyframes = [widthBinding, heightBinding].some((binding) =>
+      binding?.tracks?.some((track) => track.keyframes.length >= 2),
+    );
+    if (hasSizeKeyframes) {
+      throw new Error(`#solid 图层「${label}」不支持 WIDTH/HEIGHT size 动画`);
+    }
+  }
+
+  return {
+    width: geometry.width,
+    height: geometry.height,
+    solidColor: solid.color,
+    fillOpacity: solid.opacity,
+  };
+}
+
+function mapSolidLayer(
+  node: SceneNode,
+  parent: SceneNode | null,
+  ctx: PagExportContext,
+  exportName: string,
+): PagLayer {
+  const eligible = assertSolidEligible(node, exportName);
+  ctx.nodeCount += 1;
+  const motion = readMotionForNode(node, parent, eligible.width, eligible.height, ctx);
+  if (motion?.sizeAnimated) {
+    throw new Error(`#solid 图层「${exportName || node.name}」不支持 WIDTH/HEIGHT size 动画`);
+  }
+
+  const base = layerBase(
+    node,
+    parent,
+    eligible.width,
+    eligible.height,
+    ctx,
+    motion,
+    exportName,
+  );
+
+  // Bake fill opacity into layer opacity (Solid color is RGB only).
+  if (eligible.fillOpacity < OPAQUE) {
+    const ratio = eligible.fillOpacity / 255;
+    const opacity = base.transform.opacity;
+    if (opacity.animatable === false) {
+      base.transform.opacity = staticProperty(Math.round(opacity.value * ratio));
+    } else {
+      base.transform.opacity = {
+        animatable: true,
+        keyframes: opacity.keyframes.map((keyframe) => ({
+          ...keyframe,
+          startValue: Math.round(keyframe.startValue * ratio),
+          endValue: Math.round(keyframe.endValue * ratio),
+        })),
+      };
+    }
+  }
+
+  return {
+    ...base,
+    type: LayerType.Solid,
+    solidColor: eligible.solidColor,
+    width: eligible.width,
+    height: eligible.height,
+  };
+}
+
+async function mapGeometryLayer(
+  node: SceneNode,
+  parent: SceneNode | null,
+  ctx: PagExportContext,
+): Promise<PagLayer | null> {
+  const solidMarker = parseSolidMarker(node.name);
+  if (solidMarker.isSolid) {
+    return mapSolidLayer(node, parent, ctx, solidMarker.exportName);
+  }
+
+  if (hasImageFill('fills' in node ? node.fills : []) && 'exportAsync' in node) {
+    const imageLayer = await mapImageLayer(
+      node as SceneNode & MinimalFillsMixin & ExportMixin,
+      parent,
+      ctx,
+    );
+    if (imageLayer) {
+      return imageLayer;
+    }
+  }
+
+  ctx.nodeCount += 1;
+  const size = resolvedSize(node);
+  const motion = readMotionForNode(node, parent, size.width, size.height, ctx);
+  const base = layerBase(node, parent, size.width, size.height, ctx, motion);
+  let contents = shapeContentsFromNode(node, ctx);
+  if (contents.length === 0) {
+    addDiagnostic(ctx.diagnostics, 'warning', 'EMPTY_SHAPE', '形状层无内容，已跳过', node.id);
+    return null;
+  }
+
+  if (motion?.sizeAnimated) {
+    const hasSizedShape = contents.some(
+      (element) => element.kind === 'rectangle' || element.kind === 'ellipse',
+    );
+    if (hasSizedShape) {
+      contents = applySizeAnimationToContents(contents, motion);
+    } else {
+      // Path-only: match PAGX matrix scale-from-origin
+      base.transform.scale = scaleFromSizeFrames(motion, size.width, size.height);
+    }
+  }
+
+  return {
+    ...base,
+    type: LayerType.Shape,
+    contents,
+  };
+}
+
+async function mapContainerAsComposition(
+  node: SceneNode & ChildrenMixin,
+  ctx: PagExportContext,
+): Promise<{ compositionId: number; width: number; height: number }> {
+  const size = resolvedSize(node);
+  const compositionId = allocCompositionId(ctx);
+  const layers: PagLayer[] = [];
+
+  // Own fill/stroke as a shape layer at origin
+  const selfContents = shapeContentsFromNode(node, ctx);
+  if (selfContents.length > 0) {
+    ctx.nodeCount += 1;
+    layers.push({
+      id: allocLayerId(ctx),
+      name: `${node.name} Background`,
+      isActive: true,
+      autoOrientation: false,
+      parentId: null,
+      stretch: { ...DEFAULT_RATIO },
+      startTime: 0,
+      duration: Math.max(1, ctx.durationFrames),
+      blendMode: BlendMode.Normal,
+      trackMatteType: 0,
+      transform: defaultTransform2D({
+        anchorPoint: { x: size.width / 2, y: size.height / 2 },
+        position: { x: size.width / 2, y: size.height / 2 },
+      }),
+      masks: [],
+      type: LayerType.Shape,
+      contents: selfContents,
+    });
+  }
+
+  let pendingMask: PagMaskData | null = null;
+  const children = [...node.children];
+  for (const child of children) {
+    if (isMaskNode(child)) {
+      if (child.maskType && child.maskType !== 'ALPHA') {
+        addDiagnostic(
+          ctx.diagnostics,
+          'warning',
+          'MASK_APPROXIMATION',
+          `Figma maskType=${child.maskType} 无法完全对齐 PAG MaskData，已用路径 + Add 近似`,
+          child.id,
+        );
+      }
+      const path = maskPathFromNode(child, ctx);
+      if (path) {
+        const { left, top } = layoutLeftTop(child, node);
+        // Offset path into parent composition space
+        const offsetPoints = path.points.map((point) => ({
+          x: point.x + left,
+          y: point.y + top,
+        }));
+        pendingMask = {
+          id: allocMaskId(ctx),
+          inverted: false,
+          maskMode: MaskMode.Add,
+          maskPath: staticProperty({ verbs: path.verbs, points: offsetPoints }),
+          maskOpacity: staticProperty(OPAQUE),
+          maskExpansion: staticProperty(0),
+        };
+      }
+      continue;
+    }
+
+    const mapped = await mapNodeToLayer(child, node, ctx);
+    if (!mapped) {
+      continue;
+    }
+    if (pendingMask) {
+      mapped.masks = [...mapped.masks, pendingMask];
+    }
+    layers.push(mapped);
+  }
+
+  // PAG draws first layer at bottom; Figma children[0] is top → reverse
+  layers.reverse();
+
+  ctx.compositions.push({
+    id: compositionId,
+    width: Math.max(1, Math.round(size.width)),
+    height: Math.max(1, Math.round(size.height)),
+    duration: Math.max(1, ctx.durationFrames),
+    frameRate: MOTION_FRAME_RATE,
+    backgroundColor: ColorWhite,
+    layers,
+  });
+
+  return { compositionId, width: size.width, height: size.height };
+}
+
+async function mapNodeToLayer(
+  node: SceneNode,
+  parent: SceneNode | null,
+  ctx: PagExportContext,
+): Promise<PagLayer | null> {
+  if (node.type === 'SLICE') {
+    return null;
+  }
+
+  if (isContainerNode(node)) {
+    const nested = await mapContainerAsComposition(node, ctx);
+    ctx.nodeCount += 1;
+    const base = layerBase(node, parent, nested.width, nested.height, ctx);
+    return {
+      ...base,
+      type: LayerType.PreCompose,
+      compositionId: nested.compositionId,
+      compositionStartTime: 0,
+    };
+  }
+
+  if (node.type === 'TEXT') {
+    return mapTextLayer(node, parent, ctx);
+  }
+
+  if (isGeometryNode(node)) {
+    return mapGeometryLayer(node, parent, ctx);
+  }
+
+  addDiagnostic(
+    ctx.diagnostics,
+    'warning',
+    'UNSUPPORTED_NODE',
+    `跳过不支持的节点类型 ${node.type}`,
+    node.id,
+  );
+  return null;
+}
+
+function finalizeDurations(ctx: PagExportContext): void {
+  const duration = Math.max(1, ctx.durationFrames);
+  for (const composition of ctx.compositions) {
+    composition.duration = duration;
+    for (const layer of composition.layers) {
+      layer.duration = duration;
+    }
+  }
+}
+
+export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Promise<PagFile> {
+  const width = roundDimension(
+    'width' in root ? root.width : 1,
+  );
+  const height = roundDimension(
+    'height' in root ? root.height : 1,
+  );
+
+  // First pass: if root has motion, expand duration early
+  if (isMotionNode(root)) {
+    const motion = collectPagMotionFrames(root, null, width, height, 0, 0, ctx.diagnostics);
+    if (motion) {
+      ctx.durationFrames = Math.max(ctx.durationFrames, motion.durationFrames);
+    }
+  }
+
+  const mainId = allocCompositionId(ctx);
+  const layers: PagLayer[] = [];
+
+  if (isContainerNode(root)) {
+    // Root composition IS the container content (not wrapped in PreCompose)
+    const nested = await mapContainerAsComposition(root, ctx);
+    // mapContainerAsComposition already pushed a composition — use it as main by moving to end
+    const created = ctx.compositions.find((item) => item.id === nested.compositionId);
+    if (created) {
+      // Remove and re-add as last (main)
+      ctx.compositions = ctx.compositions.filter((item) => item.id !== nested.compositionId);
+      created.id = mainId;
+      ctx.compositions.push(created);
+    }
+  } else if (root.type === 'TEXT') {
+    const layer = mapTextLayer(root, null, ctx);
+    if (!layer.transform.position.animatable) {
+      const pivot = motionPivotForExport(root, width, height);
+      layer.transform.position = staticProperty({ x: pivot.x, y: pivot.y });
+      layer.transform.anchorPoint = staticProperty({ x: pivot.x, y: pivot.y });
+    }
+    layers.push(layer);
+    ctx.compositions.push({
+      id: mainId,
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+      duration: Math.max(1, ctx.durationFrames),
+      frameRate: MOTION_FRAME_RATE,
+      backgroundColor: ColorWhite,
+      layers,
+    });
+  } else if (isGeometryNode(root)) {
+    const layer = await mapNodeToLayer(root, null, ctx);
+    if (layer) {
+      // Root layer at origin
+      if (layer.transform.position.animatable === false) {
+        const pivot = motionPivotForExport(root, width, height);
+        layer.transform.position = staticProperty({ x: pivot.x, y: pivot.y });
+        layer.transform.anchorPoint = staticProperty({ x: pivot.x, y: pivot.y });
+      }
+      layers.push(layer);
+    }
+    ctx.compositions.push({
+      id: mainId,
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+      duration: Math.max(1, ctx.durationFrames),
+      frameRate: MOTION_FRAME_RATE,
+      backgroundColor: ColorWhite,
+      layers,
+    });
+  } else {
+    addDiagnostic(ctx.diagnostics, 'error', 'UNSUPPORTED_ROOT', `不支持的 root 节点类型 ${root.type}`, root.id);
+    ctx.compositions.push({
+      id: mainId,
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+      duration: 1,
+      frameRate: MOTION_FRAME_RATE,
+      backgroundColor: ColorWhite,
+      layers: [],
+    });
+  }
+
+  finalizeDurations(ctx);
+
+  return {
+    compositions: ctx.compositions,
+    images: ctx.images,
+    fonts: ctx.fonts,
+  };
+}
+
+export async function exportPag(root: SceneNode): Promise<PagExportResult> {
+  const ctx = createPagExportContext();
+  const file = await mapFigmaToPag(root, ctx);
+  const bytes = encodePagFile(file);
+  const main = file.compositions[file.compositions.length - 1];
+  return {
+    bytes,
+    file,
+    diagnostics: ctx.diagnostics,
+    nodeCount: ctx.nodeCount,
+    width: main?.width ?? 0,
+    height: main?.height ?? 0,
+  };
+}
+
+// Re-export helpers used by tests
+export { encodePagFile, createPagExportContext, opacityToPag, svgToPagPath, keyframesFromValues };
+export type { PagPoint };
