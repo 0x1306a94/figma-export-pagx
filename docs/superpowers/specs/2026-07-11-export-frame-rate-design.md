@@ -1,6 +1,6 @@
 # 导出帧率可配置 — 设计
 
-**状态：** 待实现  
+**状态：** 已实现  
 **范围：** `ui.html`、`src/code.ts`、`src/export/index.ts`、`src/export/figma-motion.ts`、`src/export/figma-to-pagx.ts`、`src/export/pag/figma-to-pag.ts`、相关测试与文档。
 
 ## 背景

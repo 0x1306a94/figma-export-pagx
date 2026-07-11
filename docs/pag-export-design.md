@@ -73,7 +73,7 @@ figma-reader / path-detect / figma-motion 采样
 
 | 项 | 约定 |
 |----|------|
-| frameRate | 60（`MOTION_FRAME_RATE`） |
+| frameRate | 30（`MOTION_FRAME_RATE` 默认；面板可选 24 / 30 / 60） |
 | 锚点 | 普通层：节点中心；ImageLayer：原图中心 `(imgW/2, imgH/2)` |
 | position | 父坐标下锚点位置 = left/top + 节点半宽高（Image 亦用节点框中心） |
 | opacity | Figma 0–1 → PAG 0–255 |

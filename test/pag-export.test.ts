@@ -250,7 +250,7 @@ function testSizeAnimationUsesShapeSizeNotCenterScale(): void {
     timelines: [],
   } as unknown as SceneNode;
 
-  const motion = collectPagMotionFrames(rectangle, null, 100, 80, 20, 30, []);
+  const motion = collectPagMotionFrames(rectangle, null, 100, 80, 20, 30, [], 60);
   assert.ok(motion);
   assert.equal(motion!.sizeAnimated, true);
   assert.equal(motion!.frames[0].scaleX, 1);

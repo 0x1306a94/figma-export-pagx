@@ -26,6 +26,7 @@ import {
 import { shapeElementFromPathData } from './path-detect';
 import {
   collectMotionAnimations,
+  MOTION_FRAME_RATE,
   motionLayoutPositionForExport,
   motionLayoutSizeForExport,
   motionPivotForExport,
@@ -643,7 +644,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
   return null;
 }
 
-export function createExportContext(root: SceneNode): ExportContext {
+export function createExportContext(root: SceneNode, frameRate: number = MOTION_FRAME_RATE): ExportContext {
   const bounds = 'absoluteBoundingBox' in root && root.absoluteBoundingBox
     ? root.absoluteBoundingBox
     : { x: 0, y: 0, width: 'width' in root ? (root as { width: number }).width : 100, height: 'height' in root ? (root as { height: number }).height : 100 };
@@ -657,6 +658,7 @@ export function createExportContext(root: SceneNode): ExportContext {
     nodeCount: 0,
     layerIdByFigmaId: new Map<string, string>(),
     motionTargetIdByFigmaId: new Map<string, string>(),
+    frameRate,
   };
 }
 
@@ -692,7 +694,13 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
     width,
     height,
     resources: ctx.resources,
-    animations: collectMotionAnimations(root, ctx.layerIdByFigmaId, ctx.motionTargetIdByFigmaId, ctx.diagnostics),
+    animations: collectMotionAnimations(
+      root,
+      ctx.layerIdByFigmaId,
+      ctx.motionTargetIdByFigmaId,
+      ctx.diagnostics,
+      ctx.frameRate,
+    ),
     layers,
     customData: {
       'data-exported-by': 'figma-motion-export-pagx',

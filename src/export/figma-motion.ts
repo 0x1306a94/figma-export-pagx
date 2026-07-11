@@ -8,7 +8,9 @@ import type {
 import { roundDimension } from './color';
 import { addDiagnostic, layoutPositionAttrs, nodeBoundsInParent, nodePositionInParent, pagxMotionMatrixStringFromComponents } from './figma-reader';
 
-export const MOTION_FRAME_RATE = 60;
+export const MOTION_FRAME_RATE = 30;
+export const ALLOWED_FRAME_RATES = [24, 30, 60] as const;
+export type AllowedFrameRate = (typeof ALLOWED_FRAME_RATES)[number];
 const MOTION_ANIMATION_ID = 'motion-main';
 
 type MotionCapableNode = SceneNode & {
@@ -961,8 +963,8 @@ function logMotionDebugData(root: SceneNode): void {
   console.log('[figma-motion-export-pagx] motion debug data:', JSON.stringify(collectMotionDebugData(root), null, 2));
 }
 
-function secondsToFrame(seconds: number): number {
-  return Math.max(0, Math.round(seconds * MOTION_FRAME_RATE));
+function secondsToFrame(seconds: number, frameRate: number): number {
+  return Math.max(0, Math.round(seconds * frameRate));
 }
 
 function isVariableAlias(value: MotionEasing | VariableAlias): value is VariableAlias {
@@ -1446,6 +1448,7 @@ function buildFloatChannel(
   fieldName: string,
   channelName: string,
   diagnostics: Diagnostic[],
+  frameRate: number,
   timeOffset = 0,
 ): PagxChannel | null {
   collectSetTrackWarnings(binding, diagnostics, nodeId, fieldName);
@@ -1455,7 +1458,7 @@ function buildFloatChannel(
   }
 
   const keyframes: PagxKeyframe[] = samples.map((sample, index) => {
-    const frame = secondsToFrame(sample.time);
+    const frame = secondsToFrame(sample.time, frameRate);
     const keyframe: PagxKeyframe = {
       time: frame,
       value: String(roundDimension(sample.value)),
@@ -1472,6 +1475,7 @@ function buildFloatChannel(
 function buildAlphaChannel(
   node: MotionCapableNode,
   diagnostics: Diagnostic[],
+  frameRate: number,
 ): PagxChannel | null {
   const binding = node.animations.OPACITY;
   if (!binding) {
@@ -1483,6 +1487,7 @@ function buildAlphaChannel(
     'OPACITY',
     'alpha',
     diagnostics,
+    frameRate,
     motionStyleTimelineOffset(node, 'OPACITY'),
   );
 }
@@ -1954,12 +1959,13 @@ function buildMatrixSampleTimes(
   node: MotionCapableNode,
   transformSamples: ReturnType<typeof readTransformSamples>,
   sizeSamples: ReturnType<typeof readSizeSamples>,
+  frameRate: number,
 ): number[] {
   if (shouldBakeMatrixPerFrame(node, transformSamples, sizeSamples)) {
-    const endFrame = Math.max(1, secondsToFrame(maxTransformKeyframeSeconds(transformSamples, sizeSamples)));
+    const endFrame = Math.max(1, secondsToFrame(maxTransformKeyframeSeconds(transformSamples, sizeSamples), frameRate));
     const times: number[] = [];
     for (let frame = 0; frame <= endFrame; frame += 1) {
-      times.push(frame / MOTION_FRAME_RATE);
+      times.push(frame / frameRate);
     }
     return times;
   }
@@ -1998,6 +2004,7 @@ function buildMatrixChannel(
   node: MotionCapableNode,
   parent: SceneNode | null,
   diagnostics: Diagnostic[],
+  frameRate: number,
 ): PagxChannel | null {
   const transformSamples = readTransformSamples(node, parent, diagnostics);
   const sizeSamples = readSizeSamples(node, diagnostics);
@@ -2009,7 +2016,7 @@ function buildMatrixChannel(
 
   const bakePerFrame = shouldBakeMatrixPerFrame(node, transformSamples, sizeSamples);
   const sampleMatrixFloat = bakePerFrame ? sampleFloatAtEased : sampleFloatAt;
-  const sampleTimes = buildMatrixSampleTimes(node, transformSamples, sizeSamples);
+  const sampleTimes = buildMatrixSampleTimes(node, transformSamples, sizeSamples, frameRate);
   const rotationBinding = node.animations.ROTATION;
   const rotationBase = resolveRotationBase();
   const rotationDirection = resolveRotationDirection(node);
@@ -2098,7 +2105,7 @@ function buildMatrixChannel(
       ) ?? '1,0,0,1,0,0');
 
     const keyframe: PagxKeyframe = {
-      time: secondsToFrame(time),
+      time: secondsToFrame(time, frameRate),
       value: matrix,
     };
     if (!bakePerFrame) {
@@ -2131,10 +2138,11 @@ function keyframesFromFloatSamples(
   nodeId: string,
   diagnostics: Diagnostic[],
   mapValue: (value: number) => number,
+  frameRate: number,
 ): PagxKeyframe[] {
   return samples.map((sample, index) => {
     const keyframe: PagxKeyframe = {
-      time: secondsToFrame(sample.time),
+      time: secondsToFrame(sample.time, frameRate),
       value: String(roundDimension(mapValue(sample.value))),
     };
     if (index < samples.length - 1) {
@@ -2150,6 +2158,7 @@ function buildFloatSamplesChannel(
   nodeId: string,
   diagnostics: Diagnostic[],
   mapValue: (value: number) => number,
+  frameRate: number,
 ): PagxChannel | null {
   if (!isAnimatedFloat(samples)) {
     return null;
@@ -2157,7 +2166,7 @@ function buildFloatSamplesChannel(
   return {
     name,
     type: 'float',
-    keyframes: keyframesFromFloatSamples(samples, nodeId, diagnostics, mapValue),
+    keyframes: keyframesFromFloatSamples(samples, nodeId, diagnostics, mapValue, frameRate),
   };
 }
 
@@ -2165,6 +2174,7 @@ function buildSizeScaleChannels(
   samples: ReturnType<typeof readSizeSamples>,
   nodeId: string,
   diagnostics: Diagnostic[],
+  frameRate: number,
 ): PagxChannel[] {
   const channels: PagxChannel[] = [];
   if (samples.baseWidth > 0) {
@@ -2174,6 +2184,7 @@ function buildSizeScaleChannels(
       nodeId,
       diagnostics,
       (value) => value / samples.baseWidth,
+      frameRate,
     );
     if (scaleX) {
       channels.push(scaleX);
@@ -2186,6 +2197,7 @@ function buildSizeScaleChannels(
       nodeId,
       diagnostics,
       (value) => value / samples.baseHeight,
+      frameRate,
     );
     if (scaleY) {
       channels.push(scaleY);
@@ -2198,6 +2210,7 @@ function buildGroupTransformChannels(
   node: MotionCapableNode,
   parent: SceneNode | null,
   diagnostics: Diagnostic[],
+  frameRate: number,
 ): PagxChannel[] {
   const transformSamples = readTransformSamples(node, parent, diagnostics);
   const channels: PagxChannel[] = [];
@@ -2230,12 +2243,12 @@ function buildGroupTransformChannels(
     channels.push({
       name: 'position.x',
       type: 'float',
-      keyframes: keyframesFromFloatSamples(xSamples, node.id, diagnostics, (value) => pivot.x + value - originX),
+      keyframes: keyframesFromFloatSamples(xSamples, node.id, diagnostics, (value) => pivot.x + value - originX, frameRate),
     });
     channels.push({
       name: 'position.y',
       type: 'float',
-      keyframes: keyframesFromFloatSamples(ySamples, node.id, diagnostics, (value) => pivot.y + value - originY),
+      keyframes: keyframesFromFloatSamples(ySamples, node.id, diagnostics, (value) => pivot.y + value - originY, frameRate),
     });
   } else {
     const originX = setTranslationOrigin?.x ?? 0;
@@ -2246,6 +2259,7 @@ function buildGroupTransformChannels(
       node.id,
       diagnostics,
       (value) => pivot.x + value - originX,
+      frameRate,
     );
     if (positionX) {
       channels.push(positionX);
@@ -2256,6 +2270,7 @@ function buildGroupTransformChannels(
       node.id,
       diagnostics,
       (value) => pivot.y + value - originY,
+      frameRate,
     );
     if (positionY) {
       channels.push(positionY);
@@ -2276,6 +2291,7 @@ function buildGroupTransformChannels(
         usesSetRotation,
       );
     },
+    frameRate,
   );
   if (rotation) {
     channels.push(rotation);
@@ -2295,25 +2311,25 @@ function buildGroupTransformChannels(
     channels.push({
       name: 'scale.x',
       type: 'float',
-      keyframes: keyframesFromFloatSamples(xSamples, node.id, diagnostics, (value) => value),
+      keyframes: keyframesFromFloatSamples(xSamples, node.id, diagnostics, (value) => value, frameRate),
     });
     channels.push({
       name: 'scale.y',
       type: 'float',
-      keyframes: keyframesFromFloatSamples(ySamples, node.id, diagnostics, (value) => value),
+      keyframes: keyframesFromFloatSamples(ySamples, node.id, diagnostics, (value) => value, frameRate),
     });
   } else {
-    const scaleX = buildFloatSamplesChannel('scale.x', transformSamples.scaleX, node.id, diagnostics, (value) => value);
+    const scaleX = buildFloatSamplesChannel('scale.x', transformSamples.scaleX, node.id, diagnostics, (value) => value, frameRate);
     if (scaleX) {
       channels.push(scaleX);
     }
-    const scaleY = buildFloatSamplesChannel('scale.y', transformSamples.scaleY, node.id, diagnostics, (value) => value);
+    const scaleY = buildFloatSamplesChannel('scale.y', transformSamples.scaleY, node.id, diagnostics, (value) => value, frameRate);
     if (scaleY) {
       channels.push(scaleY);
     }
   }
 
-  for (const channel of buildSizeScaleChannels(sizeSamples, node.id, diagnostics)) {
+  for (const channel of buildSizeScaleChannels(sizeSamples, node.id, diagnostics, frameRate)) {
     if (!channels.some((item) => item.name === channel.name)) {
       channels.push(channel);
     }
@@ -2430,8 +2446,9 @@ export function shouldBakeMatrixPerFrameForTest(
 export function buildMatrixChannelForTest(
   node: MotionCapableNode,
   parent: SceneNode | null = null,
+  frameRate: number = MOTION_FRAME_RATE,
 ): PagxChannel | null {
-  return buildMatrixChannel(node, parent, []);
+  return buildMatrixChannel(node, parent, [], frameRate);
 }
 
 export function springProgressForTest(progress: number, bounce: number): number {
@@ -2562,6 +2579,7 @@ export function collectPagMotionFrames(
   layoutLeft: number,
   layoutTop: number,
   diagnostics: Diagnostic[],
+  frameRate: number = MOTION_FRAME_RATE,
 ): PagMotionResult | null {
   if (!isMotionNode(node)) {
     return null;
@@ -2588,9 +2606,9 @@ export function collectPagMotionFrames(
     maxTransformKeyframeSeconds(transformSamples, sizeSamples),
     opacitySamples.length > 0 ? opacitySamples[opacitySamples.length - 1].time : 0,
   );
-  const durationFrames = Math.max(1, Math.ceil(endSeconds * MOTION_FRAME_RATE));
+  const durationFrames = Math.max(1, Math.ceil(endSeconds * frameRate));
   const sampleTimes = bakePerFrame
-    ? Array.from({ length: durationFrames + 1 }, (_, frame) => frame / MOTION_FRAME_RATE)
+    ? Array.from({ length: durationFrames + 1 }, (_, frame) => frame / frameRate)
     : mergeSampleTimes([
       transformSamples.sampleTimes,
       sizeSamples.sampleTimes,
@@ -2674,7 +2692,7 @@ export function collectPagMotionFrames(
       : layoutTop + pivot.y + translationY;
 
     frames.push({
-      frame: Math.round(time * MOTION_FRAME_RATE),
+      frame: Math.round(time * frameRate),
       positionX,
       positionY,
       scaleX,
@@ -2694,6 +2712,7 @@ export function collectMotionAnimations(
   layerIdByFigmaId: Map<string, string>,
   motionTargetIdByFigmaId: Map<string, string>,
   diagnostics: Diagnostic[],
+  frameRate: number = MOTION_FRAME_RATE,
 ): PagxAnimation[] {
   if (!isMotionNode(root)) {
     return [];
@@ -2708,7 +2727,7 @@ export function collectMotionAnimations(
   }
 
   const durationSeconds = resolveDurationSeconds(root, motionNodes);
-  const durationFrames = Math.max(1, Math.ceil(durationSeconds * MOTION_FRAME_RATE));
+  const durationFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
 
   const objects: PagxAnimationObject[] = [];
   for (const node of motionNodes) {
@@ -2725,21 +2744,21 @@ export function collectMotionAnimations(
     }
 
     const parent = resolveParentForNode(root, node);
-    const alpha = buildAlphaChannel(node, diagnostics);
+    const alpha = buildAlphaChannel(node, diagnostics, frameRate);
     if (alpha) {
       objects.push({ target: targetId, channels: [alpha] });
     }
 
     const motionTargetId = motionTargetIdByFigmaId.get(node.id);
     const transformChannels = motionTargetId
-      ? buildGroupTransformChannels(node, parent, diagnostics)
+      ? buildGroupTransformChannels(node, parent, diagnostics, frameRate)
       : [];
     if (motionTargetId && transformChannels.length > 0) {
       objects.push({ target: motionTargetId, channels: transformChannels });
       continue;
     }
 
-    const matrix = buildMatrixChannel(node, parent, diagnostics);
+    const matrix = buildMatrixChannel(node, parent, diagnostics, frameRate);
     if (matrix) {
       objects.push({ target: targetId, channels: [matrix] });
     }
@@ -2752,7 +2771,7 @@ export function collectMotionAnimations(
   return [{
     id: MOTION_ANIMATION_ID,
     duration: durationFrames,
-    frameRate: MOTION_FRAME_RATE,
+    frameRate,
     loop: 'once',
     objects,
   }];

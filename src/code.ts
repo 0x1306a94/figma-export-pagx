@@ -4,9 +4,13 @@ import { exportPagx, exportPag } from './export';
 import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
 
 type PluginMessage =
-  | { type: 'export-pagx' }
-  | { type: 'export-pag' }
+  | { type: 'export-pagx'; frameRate?: number }
+  | { type: 'export-pag'; frameRate?: number }
   | { type: 'refresh-motion-anchor' };
+
+function resolveFrameRate(value: unknown): number {
+  return value === 24 || value === 30 || value === 60 ? value : 30;
+}
 
 function sendSelectionMotionData(): void {
   const selection = figma.currentPage.selection;
@@ -71,10 +75,11 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   }
 
   const root = selection[0];
+  const frameRate = resolveFrameRate(msg.frameRate);
 
   try {
     if (msg.type === 'export-pag') {
-      const result = await exportPag(root);
+      const result = await exportPag(root, { frameRate });
       figma.ui.postMessage({
         type: 'export-pag-result',
         bytes: Array.from(result.bytes),
@@ -87,7 +92,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       return;
     }
 
-    const result = await exportPagx(root);
+    const result = await exportPagx(root, { frameRate });
     figma.ui.postMessage({
       type: 'export-result',
       xml: result.xml,

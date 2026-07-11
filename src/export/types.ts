@@ -114,6 +114,10 @@ export type PagxDocument = {
   customData: Record<string, string>;
 };
 
+export type ExportOptions = {
+  frameRate?: number;
+};
+
 export type ExportResult = {
   document: PagxDocument;
   diagnostics: Diagnostic[];
@@ -129,4 +133,5 @@ export type ExportContext = {
   nodeCount: number;
   layerIdByFigmaId: Map<string, string>;
   motionTargetIdByFigmaId: Map<string, string>;
+  frameRate: number;
 };

@@ -154,7 +154,8 @@ async function testMotionDataIsExported(): Promise<void> {
   assert(exportedXml.includes('<Animations>'), 'xml should include Animations');
   assert(exportedXml.includes('<Channel name="alpha" type="float">'), 'opacity should export as alpha channel');
   assert(exportedXml.includes('<Key time="0" value="0"/>'), 'first opacity keyframe missing');
-  assert(exportedXml.includes('<Key time="60" value="1"/>'), 'last opacity keyframe missing');
+  assert(exportedXml.includes('<Key time="30" value="1"/>'), 'last opacity keyframe missing');
+  assert(exportedXml.includes('frameRate="30"'), 'default animation frameRate should be 30');
 }
 
 async function testNoMotionDataSkipsAnimations(): Promise<void> {

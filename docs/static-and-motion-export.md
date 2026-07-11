@@ -87,7 +87,7 @@ PAGX 动画基础参数：
 | 字段          | 当前值                       |
 | ----------- | ------------------------- |
 | `id`        | `motion-main`             |
-| `frameRate` | `60`                      |
+| `frameRate` | 默认 `30`（可选手动指定 24 / 30 / 60） |
 | `loop`      | `once`                    |
 | `duration`  | 根据 Figma timeline 秒数换算为帧数 |
 
@@ -250,7 +250,7 @@ Figma `animationStyles[*].timelineOffset` 会叠加到对应字段的 keyframe �
 - `SCALE_X/Y/XY` 匹配 scale preset。
 - `WIDTH` / `HEIGHT` 匹配 size / resize preset。
 
-例如 Frame8 的 `Rectangle27` opacity keyframe 本身是 `0s -> 0.41s`，style offset 是 `1.09s`，导出到 60fps 后应是 `65 -> 90` 帧。
+例如 Frame8 的 `Rectangle27` opacity keyframe 本身是 `0s -> 0.41s`，style offset 是 `1.09s`，导出到 60fps 后应是 `65 -> 90` 帧；默认 30fps 则为 `33 -> 45` 帧。
 
 
 
@@ -270,7 +270,7 @@ Figma keyframe 的 easing 会映射到 PAGX keyframe：
 
 ```xml
 <Animations>
-  <Animation id="motion-main" duration="..." frameRate="60" loop="once">
+  <Animation id="motion-main" duration="..." frameRate="30" loop="once">
     <Object target="...">
       <Channel name="position.x" type="float">
         <Key time="..." value="..." />

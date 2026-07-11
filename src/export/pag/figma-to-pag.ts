@@ -69,6 +69,7 @@ export type PagExportContext = {
   fonts: Array<{ fontFamily: string; fontStyle: string }>;
   fontKeys: Set<string>;
   durationFrames: number;
+  frameRate: number;
 };
 
 export type PagExportResult = {
@@ -80,7 +81,7 @@ export type PagExportResult = {
   height: number;
 };
 
-function createPagExportContext(): PagExportContext {
+function createPagExportContext(frameRate: number = MOTION_FRAME_RATE): PagExportContext {
   return {
     diagnostics: [],
     nodeCount: 0,
@@ -94,6 +95,7 @@ function createPagExportContext(): PagExportContext {
     fonts: [],
     fontKeys: new Set(),
     durationFrames: 1,
+    frameRate,
   };
 }
 
@@ -270,6 +272,7 @@ function readMotionForNode(
     left,
     top,
     ctx.diagnostics,
+    ctx.frameRate,
   );
   if (motion) {
     ctx.durationFrames = Math.max(ctx.durationFrames, motion.durationFrames);
@@ -919,7 +922,7 @@ async function mapContainerAsComposition(
     width: Math.max(1, Math.round(size.width)),
     height: Math.max(1, Math.round(size.height)),
     duration: Math.max(1, ctx.durationFrames),
-    frameRate: MOTION_FRAME_RATE,
+    frameRate: ctx.frameRate,
     backgroundColor: ColorWhite,
     layers,
   });
@@ -986,7 +989,7 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
 
   // First pass: if root has motion, expand duration early
   if (isMotionNode(root)) {
-    const motion = collectPagMotionFrames(root, null, width, height, 0, 0, ctx.diagnostics);
+    const motion = collectPagMotionFrames(root, null, width, height, 0, 0, ctx.diagnostics, ctx.frameRate);
     if (motion) {
       ctx.durationFrames = Math.max(ctx.durationFrames, motion.durationFrames);
     }
@@ -1024,7 +1027,7 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
       width: Math.max(1, Math.round(width)),
       height: Math.max(1, Math.round(height)),
       duration: Math.max(1, ctx.durationFrames),
-      frameRate: MOTION_FRAME_RATE,
+      frameRate: ctx.frameRate,
       backgroundColor: ColorWhite,
       layers,
     });
@@ -1044,7 +1047,7 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
       width: Math.max(1, Math.round(width)),
       height: Math.max(1, Math.round(height)),
       duration: Math.max(1, ctx.durationFrames),
-      frameRate: MOTION_FRAME_RATE,
+      frameRate: ctx.frameRate,
       backgroundColor: ColorWhite,
       layers,
     });
@@ -1055,7 +1058,7 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
       width: Math.max(1, Math.round(width)),
       height: Math.max(1, Math.round(height)),
       duration: 1,
-      frameRate: MOTION_FRAME_RATE,
+      frameRate: ctx.frameRate,
       backgroundColor: ColorWhite,
       layers: [],
     });
@@ -1070,8 +1073,12 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
   };
 }
 
-export async function exportPag(root: SceneNode): Promise<PagExportResult> {
-  const ctx = createPagExportContext();
+export async function exportPag(
+  root: SceneNode,
+  options?: { frameRate?: number },
+): Promise<PagExportResult> {
+  const frameRate = options?.frameRate ?? MOTION_FRAME_RATE;
+  const ctx = createPagExportContext(frameRate);
   const file = await mapFigmaToPag(root, ctx);
   const bytes = encodePagFile(file);
   const main = file.compositions[file.compositions.length - 1];

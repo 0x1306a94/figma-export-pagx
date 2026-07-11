@@ -371,6 +371,7 @@ function testFrame8Rectangle27OpacityUsesStyleTimelineOffset(): void {
     new Map([[node.id, 'layer_9_186']]),
     new Map(),
     [],
+    60,
   );
   const alphaObject = animations[0].objects.find((item) => item.target === 'layer_9_186');
   const alpha = alphaObject?.channels.find((channel) => channel.name === 'alpha');
@@ -378,6 +379,59 @@ function testFrame8Rectangle27OpacityUsesStyleTimelineOffset(): void {
   assert(alpha, 'Rectangle27 should export alpha');
   assert.deepEqual(alpha.keyframes.map((keyframe) => keyframe.time), [65, 90]);
   assert.deepEqual(alpha.keyframes.map((keyframe) => keyframe.value), ['1', '0']);
+}
+
+function testDefaultFrameRateIs30(): void {
+  const node = {
+    id: '9:186',
+    type: 'RECTANGLE',
+    x: 272,
+    y: 848,
+    width: 506,
+    height: 257,
+    animations: {
+      OPACITY: {
+        timelineDuration: 2,
+        baseValue: { type: 'FLOAT' as const, value: 1 },
+        tracks: [{
+          keyframeOperation: 'SCALE' as const,
+          keyframes: [
+            { timelinePosition: 0, value: { type: 'FLOAT' as const, value: 1 }, easing: LINEAR_EASING },
+            { timelinePosition: 0.41, value: { type: 'FLOAT' as const, value: 0 }, easing: LINEAR_EASING },
+          ],
+        }],
+      },
+    },
+    animationStyles: [{
+      name: 'motion.preset_name.opacity',
+      timelineOffset: 1.09,
+      props: { type: 'fadeOut' },
+    }],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const root = {
+    id: '9:183',
+    type: 'FRAME',
+    children: [node],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const animations = collectMotionAnimations(
+    root,
+    new Map([[node.id, 'layer_9_186']]),
+    new Map(),
+    [],
+  );
+  const alphaObject = animations[0].objects.find((item) => item.target === 'layer_9_186');
+  const alpha = alphaObject?.channels.find((channel) => channel.name === 'alpha');
+
+  assert.equal(animations[0].frameRate, 30);
+  assert.equal(animations[0].duration, 60);
+  assert(alpha, 'Rectangle27 should export alpha at default 30fps');
+  assert.deepEqual(alpha.keyframes.map((keyframe) => keyframe.time), [33, 45]);
 }
 
 function testResolveMatrixTransformOrderFromAnimationStyles(): void {
@@ -1084,6 +1138,7 @@ function run(): void {
   testManualSetTranslationUsesFirstKeyframeAsMatrixOrigin();
   testFrame8Rectangle28ManualSetTranslationKeepsRawDirection();
   testFrame8Rectangle27OpacityUsesStyleTimelineOffset();
+  testDefaultFrameRateIs30();
   testMotionGroupSizeAnimationKeepsEasing();
   testSizeOnlyMatrixAnimationKeepsEasing();
   testMotionDebugDataIncludesTransformDetails();

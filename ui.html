@@ -113,6 +113,29 @@
     .toggle-row input {
       margin: 0;
     }
+    .frame-rate-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .frame-rate-row span {
+      font-size: 12px;
+      color: #333;
+    }
+    .frame-rate-row select {
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #111;
+    }
+    .frame-rate-row select:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
     #motion-body {
       display: none;
       margin-top: 8px;
@@ -153,6 +176,14 @@
 
   <div class="section">
     <div class="section-label">导出</div>
+    <label class="frame-rate-row">
+      <span>帧率</span>
+      <select id="frame-rate">
+        <option value="24">24</option>
+        <option value="30" selected>30</option>
+        <option value="60">60</option>
+      </select>
+    </label>
     <button id="export">导出 PAGX</button>
     <button id="export-pag">导出 PAG</button>
     <div id="meta"></div>
@@ -175,6 +206,7 @@
   <script>
     const exportButton = document.getElementById('export');
     const exportPagButton = document.getElementById('export-pag');
+    const frameRateSelect = document.getElementById('frame-rate');
     const refreshMotionAnchorButton = document.getElementById('refresh-motion-anchor');
     const metaEl = document.getElementById('meta');
     const errorEl = document.getElementById('error');
@@ -184,6 +216,24 @@
     const motionBodyEl = document.getElementById('motion-body');
     const motionHintEl = document.getElementById('motion-hint');
     const motionJsonEl = document.getElementById('motion-json');
+
+    const FRAME_RATE_STORAGE_KEY = 'figma-motion-export-pagx:frameRate';
+    const ALLOWED_FRAME_RATES = new Set(['24', '30', '60']);
+
+    function loadFrameRate() {
+      const stored = localStorage.getItem(FRAME_RATE_STORAGE_KEY);
+      frameRateSelect.value = ALLOWED_FRAME_RATES.has(stored) ? stored : '30';
+    }
+
+    function currentFrameRate() {
+      const value = Number(frameRateSelect.value);
+      return value === 24 || value === 30 || value === 60 ? value : 30;
+    }
+
+    loadFrameRate();
+    frameRateSelect.onchange = () => {
+      localStorage.setItem(FRAME_RATE_STORAGE_KEY, frameRateSelect.value);
+    };
 
     function formatBytes(bytes) {
       if (bytes < 1024) return `${bytes} B`;
@@ -209,6 +259,7 @@
     function setExportBusy(busy) {
       exportButton.disabled = busy;
       exportPagButton.disabled = busy;
+      frameRateSelect.disabled = busy;
       exportButton.textContent = busy ? '导出中...' : '导出 PAGX';
       exportPagButton.textContent = busy ? '导出中...' : '导出 PAG';
     }
@@ -269,13 +320,13 @@
     exportButton.onclick = () => {
       clearError();
       setExportBusy(true);
-      parent.postMessage({ pluginMessage: { type: 'export-pagx' } }, '*');
+      parent.postMessage({ pluginMessage: { type: 'export-pagx', frameRate: currentFrameRate() } }, '*');
     };
 
     exportPagButton.onclick = () => {
       clearError();
       setExportBusy(true);
-      parent.postMessage({ pluginMessage: { type: 'export-pag' } }, '*');
+      parent.postMessage({ pluginMessage: { type: 'export-pag', frameRate: currentFrameRate() } }, '*');
     };
 
     refreshMotionAnchorButton.onclick = () => {
