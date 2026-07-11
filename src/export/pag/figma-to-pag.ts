@@ -24,6 +24,7 @@ import { canonicalizePathData, svgPathToPagPathData } from '../path-detect';
 import { exportLayerName, parseSolidMarker } from '../solid-marker';
 import { encodePagFile } from './encode/encode-file';
 import { makeEllipse, makeRectangle, makeSolidFill, makeSolidStroke } from './encode/encode-shapes';
+import { ensureImageBytes, scaleFromImagePaint } from './image-bytes';
 import {
   BlendMode,
   ColorBlack,
@@ -61,6 +62,7 @@ export type PagExportContext = {
   nextMaskId: number;
   compositions: PagVectorComposition[];
   images: PagImageBytes[];
+  imageIdByHash: Map<string, number>;
   fonts: Array<{ fontFamily: string; fontStyle: string }>;
   fontKeys: Set<string>;
   durationFrames: number;
@@ -85,6 +87,7 @@ function createPagExportContext(): PagExportContext {
     nextMaskId: 1,
     compositions: [],
     images: [],
+    imageIdByHash: new Map(),
     fonts: [],
     fontKeys: new Set(),
     durationFrames: 1,
@@ -100,12 +103,6 @@ function allocLayerId(ctx: PagExportContext): number {
 function allocCompositionId(ctx: PagExportContext): number {
   const id = ctx.nextCompositionId;
   ctx.nextCompositionId += 1;
-  return id;
-}
-
-function allocImageId(ctx: PagExportContext): number {
-  const id = ctx.nextImageId;
-  ctx.nextImageId += 1;
   return id;
 }
 
@@ -510,8 +507,34 @@ function mapTextLayer(
   };
 }
 
+function multiplyScaleProperty(
+  motionScale: PagProperty<PagPoint>,
+  contentScale: PagPoint,
+): PagProperty<PagPoint> {
+  if (motionScale.animatable === false) {
+    return staticProperty({
+      x: motionScale.value.x * contentScale.x,
+      y: motionScale.value.y * contentScale.y,
+    });
+  }
+  return {
+    animatable: true,
+    keyframes: motionScale.keyframes.map((keyframe) => ({
+      ...keyframe,
+      startValue: {
+        x: keyframe.startValue.x * contentScale.x,
+        y: keyframe.startValue.y * contentScale.y,
+      },
+      endValue: {
+        x: keyframe.endValue.x * contentScale.x,
+        y: keyframe.endValue.y * contentScale.y,
+      },
+    })),
+  };
+}
+
 async function mapImageLayer(
-  node: SceneNode & MinimalFillsMixin & ExportMixin,
+  node: SceneNode & MinimalFillsMixin,
   parent: SceneNode | null,
   ctx: PagExportContext,
 ): Promise<PagLayer | null> {
@@ -519,34 +542,54 @@ async function mapImageLayer(
     return null;
   }
 
-  const imagePaint = node.fills.find((paint) => paint.type === 'IMAGE' && paint.visible !== false);
-  if (!imagePaint || imagePaint.type !== 'IMAGE') {
+  const imageFills = node.fills.filter(
+    (paint): paint is ImagePaint => paint.type === 'IMAGE' && paint.visible !== false,
+  );
+  if (imageFills.length === 0) {
+    return null;
+  }
+  if (imageFills.length > 1) {
+    addDiagnostic(
+      ctx.diagnostics,
+      'warning',
+      'IMAGE_MULTI_FILL',
+      `节点有 ${imageFills.length} 个 IMAGE fill，仅导出第一个`,
+      node.id,
+    );
+  }
+
+  const imagePaint = imageFills[0];
+  if (!imagePaint.imageHash) {
+    addDiagnostic(ctx.diagnostics, 'warning', 'IMAGE_MISSING_HASH', 'IMAGE fill 缺少 imageHash', node.id);
     return null;
   }
 
   try {
-    const bytes = await node.exportAsync({
-      format: 'PNG',
-      constraint: { type: 'SCALE', value: 1 },
-    });
+    const image = await ensureImageBytes(imagePaint.imageHash, ctx, node.id);
     const size = resolvedSize(node);
-    const imageId = allocImageId(ctx);
-    ctx.images.push({
-      id: imageId,
-      fileBytes: bytes,
-      width: Math.max(1, Math.round(size.width)),
-      height: Math.max(1, Math.round(size.height)),
-      scaleFactor: 1,
-      anchorX: 0,
-      anchorY: 0,
-    });
+    const contentScale = scaleFromImagePaint(
+      imagePaint,
+      size.width,
+      size.height,
+      image.width,
+      image.height,
+      ctx.diagnostics,
+      node.id,
+    );
 
     ctx.nodeCount += 1;
+    // layerBase uses node box for position (node center in parent); override footage anchor/scale.
     const base = layerBase(node, parent, size.width, size.height, ctx);
+    base.transform.anchorPoint = staticProperty({
+      x: image.width / 2,
+      y: image.height / 2,
+    });
+    base.transform.scale = multiplyScaleProperty(base.transform.scale, contentScale);
+
     return {
       ...base,
       type: LayerType.Image,
-      imageId,
+      imageId: image.id,
     };
   } catch (error) {
     addDiagnostic(
@@ -743,9 +786,9 @@ async function mapGeometryLayer(
     return mapSolidLayer(node, parent, ctx, solidMarker.exportName);
   }
 
-  if (hasImageFill('fills' in node ? node.fills : []) && 'exportAsync' in node) {
+  if (hasImageFill('fills' in node ? node.fills : [])) {
     const imageLayer = await mapImageLayer(
-      node as SceneNode & MinimalFillsMixin & ExportMixin,
+      node as SceneNode & MinimalFillsMixin,
       parent,
       ctx,
     );

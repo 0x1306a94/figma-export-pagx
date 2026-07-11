@@ -11,10 +11,31 @@ import {
 } from '../src/export/pag/types';
 import { EncodeStream } from '../src/export/pag/encode/encode-stream';
 import { encodePagFile } from '../src/export/pag/encode/encode-file';
+import { TagCode } from '../src/export/pag/encode/tag-code';
 import { collectPagMotionFrames } from '../src/export/figma-motion';
 import { exportLayerName, parseSolidMarker } from '../src/export/solid-marker';
 import { keyframesFromValues, opacityToPag, svgToPagPath } from '../src/export/pag/figma-to-pag';
+import { readEncodedImageSize, scaleFromImagePaint } from '../src/export/pag/image-bytes';
 import { KeyframeInterpolationType, PathVerb } from '../src/export/pag/types';
+import type { Diagnostic } from '../src/export/types';
+
+function makePngHeader(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  bytes[12] = 0x49;
+  bytes[13] = 0x48;
+  bytes[14] = 0x44;
+  bytes[15] = 0x52;
+  bytes[16] = (width >>> 24) & 0xff;
+  bytes[17] = (width >>> 16) & 0xff;
+  bytes[18] = (width >>> 8) & 0xff;
+  bytes[19] = width & 0xff;
+  bytes[20] = (height >>> 24) & 0xff;
+  bytes[21] = (height >>> 16) & 0xff;
+  bytes[22] = (height >>> 8) & 0xff;
+  bytes[23] = height & 0xff;
+  return bytes;
+}
 
 function testEncodeStreamBasics(): void {
   const stream = new EncodeStream();
@@ -358,6 +379,143 @@ function testSolidLayerEncode(): void {
   assert.ok(bytes.includes(2), 'encoded bytes should contain LayerType.Solid (=2)');
 }
 
+function testReadEncodedImageSize(): void {
+  const png = makePngHeader(400, 889);
+  assert.deepEqual(readEncodedImageSize(png), { width: 400, height: 889 });
+
+  // Minimal JPEG with SOF0 (baseline): FF D8 FF C0 len=11 precision height width …
+  const jpeg = new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x0b, 0x08, 0x01, 0x90, 0x02, 0x80, 0x03, 0x01, 0x11, 0x00,
+  ]);
+  assert.deepEqual(readEncodedImageSize(jpeg), { width: 640, height: 400 });
+
+  assert.throws(() => readEncodedImageSize(new Uint8Array([1, 2, 3])));
+}
+
+function testScaleFromImagePaint(): void {
+  const diagnostics: Diagnostic[] = [];
+  const fillPaint = { type: 'IMAGE' as const, scaleMode: 'FILL' as const, imageHash: 'h' };
+  assert.deepEqual(
+    scaleFromImagePaint(fillPaint, 400, 600, 200, 400, diagnostics),
+    { x: 2, y: 2 }, // max(400/200, 600/400) = 2
+  );
+
+  const fitPaint = { type: 'IMAGE' as const, scaleMode: 'FIT' as const, imageHash: 'h' };
+  assert.deepEqual(
+    scaleFromImagePaint(fitPaint, 400, 600, 200, 400, diagnostics),
+    { x: 1.5, y: 1.5 }, // min(2, 1.5) = 1.5
+  );
+
+  const stretchPaint = { type: 'IMAGE' as const, scaleMode: 'TILE' as const, imageHash: 'h' };
+  assert.deepEqual(
+    scaleFromImagePaint(stretchPaint, 400, 800, 200, 400, diagnostics),
+    { x: 2, y: 2 },
+  );
+  assert.ok(diagnostics.some((item) => item.code === 'IMAGE_TILE_UNSUPPORTED'));
+
+  const cropPaint = {
+    type: 'IMAGE' as const,
+    scaleMode: 'CROP' as const,
+    imageHash: 'h',
+    imageTransform: [[0.5, 0, 0], [0, 0.5, 0]] as Transform,
+  };
+  assert.deepEqual(
+    scaleFromImagePaint(cropPaint, 400, 800, 200, 400, diagnostics),
+    { x: 4, y: 4 }, // node / (img * |a|)
+  );
+}
+
+function testImageLayerPagEncode(): void {
+  const png = makePngHeader(10, 20);
+  const file = {
+    compositions: [{
+      id: 1,
+      width: 100,
+      height: 80,
+      duration: 1,
+      frameRate: 60,
+      backgroundColor: { red: 255, green: 255, blue: 255 },
+      layers: [{
+        type: LayerType.Image as const,
+        id: 1,
+        name: 'Photo',
+        isActive: true,
+        autoOrientation: false,
+        parentId: null,
+        stretch: { numerator: 1, denominator: 1 },
+        startTime: 0,
+        duration: 1,
+        blendMode: BlendMode.Normal,
+        trackMatteType: 0,
+        transform: defaultTransform2D({
+          anchorPoint: { x: 5, y: 10 },
+          position: { x: 50, y: 40 },
+          scale: { x: 10, y: 4 },
+        }),
+        masks: [],
+        imageId: 1,
+      }, {
+        type: LayerType.Image as const,
+        id: 2,
+        name: 'PhotoDup',
+        isActive: true,
+        autoOrientation: false,
+        parentId: null,
+        stretch: { numerator: 1, denominator: 1 },
+        startTime: 0,
+        duration: 1,
+        blendMode: BlendMode.Normal,
+        trackMatteType: 0,
+        transform: defaultTransform2D({
+          anchorPoint: { x: 5, y: 10 },
+          position: { x: 50, y: 40 },
+        }),
+        masks: [],
+        imageId: 1, // shared ImageBytes (AE footage dedupe)
+      }],
+    }],
+    images: [{
+      id: 1,
+      fileBytes: png,
+      width: 10,
+      height: 20,
+      scaleFactor: 1,
+      anchorX: 0,
+      anchorY: 0,
+    }],
+    fonts: [],
+  };
+
+  const bytes = encodePagFile(file);
+  assert.equal(String.fromCharCode(bytes[0], bytes[1], bytes[2]), 'PAG');
+  assert.equal(bytes[8], 'U'.charCodeAt(0));
+  let foundPng = false;
+  for (let i = 0; i + 3 < bytes.length; i += 1) {
+    if (
+      bytes[i] === 0x89
+      && bytes[i + 1] === 0x50
+      && bytes[i + 2] === 0x4e
+      && bytes[i + 3] === 0x47
+    ) {
+      foundPng = true;
+      break;
+    }
+  }
+  assert.ok(foundPng, 'should embed PNG file bytes');
+  assert.ok(bytes.includes(LayerType.Image), 'should encode Image layer type');
+  let foundImageBytesTag = false;
+  for (let i = 0; i + 1 < bytes.length; i += 1) {
+    const header = bytes[i] | (bytes[i + 1] << 8);
+    if ((header >> 6) === TagCode.ImageBytesV3) {
+      foundImageBytesTag = true;
+      break;
+    }
+  }
+  assert.ok(foundImageBytesTag, 'should encode ImageBytesV3 tag');
+  assert.equal(file.images.length, 1);
+}
+
 testEncodeStreamBasics();
 testMinimalShapePag();
 testOpacityAndPath();
@@ -366,4 +524,7 @@ testMaskAndMotionPag();
 testSizeAnimationUsesShapeSizeNotCenterScale();
 testSolidMarkerParse();
 testSolidLayerEncode();
+testReadEncodedImageSize();
+testScaleFromImagePaint();
+testImageLayerPagEncode();
 console.log('pag-export tests passed');

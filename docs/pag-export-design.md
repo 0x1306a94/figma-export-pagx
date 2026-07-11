@@ -72,13 +72,13 @@ figma-reader / path-detect / figma-motion 采样
 | 项 | 约定 |
 |----|------|
 | frameRate | 60（`MOTION_FRAME_RATE`） |
-| 锚点 | 图层中心 `(w/2, h/2)` |
-| position | 父坐标下锚点位置 = left/top + 锚点偏移 |
+| 锚点 | 普通层：节点中心；ImageLayer：原图中心 `(imgW/2, imgH/2)` |
+| position | 父坐标下锚点位置 = left/top + 节点半宽高（Image 亦用节点框中心） |
 | opacity | Figma 0–1 → PAG 0–255 |
-| scale | 1.0 = 100%（对齐 AE ScaleParser / Transform2D 默认 `(1,1)`） |
+| scale | 1.0 = 100%（对齐 AE ScaleParser / Transform2D 默认 `(1,1)`）；Image 另乘 scaleMode 映射 |
 | 嵌套 | Frame/Group → PreComposeLayer + 子 VectorComposition |
 | Mask | `isMask` 几何 → 被遮罩层 `masks[]`；alpha/luminance 无法忠实时 warning |
-| 图片 | PNG bytes 用 `ImageBytesV3`（显式宽高） |
+| 图片 | `imageHash` → 原图 PNG/JPEG 直通 `ImageBytesV3`；同 hash 去重；FILL/FIT/CROP→Transform scale（对齐 AE footage，不强制 WebP） |
 
 ### 模块
 
@@ -86,6 +86,7 @@ figma-reader / path-detect / figma-motion 采样
 src/export/pag/
   types.ts
   figma-to-pag.ts
+  image-bytes.ts   # 尺寸解析 / hash 去重 / scaleMode
   encode/
     encode-stream.ts
     tag-code.ts
@@ -99,8 +100,8 @@ src/export/pag/
 
 ### 验证
 
-- 单元测试：EncodeStream、最小 Shape PAG 魔数/可解析结构
-- 手工：同节点 `.pagx` + `.pag`，PAGViewer 打开对照
+- 单元测试：EncodeStream、最小 Shape/Image PAG、PNG 头解析、scaleMode、同 hash 去重
+- 手工：同节点 `.pagx` + `.pag`，PAGViewer 打开对照（含 Frame10 图片层）
 - 硬门槛：字节可被 `pag::File::Load` 打开
 
 ## 5. 风险
