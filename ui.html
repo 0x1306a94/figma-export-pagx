@@ -217,23 +217,10 @@
     const motionHintEl = document.getElementById('motion-hint');
     const motionJsonEl = document.getElementById('motion-json');
 
-    const FRAME_RATE_STORAGE_KEY = 'figma-motion-export-pagx:frameRate';
-    const ALLOWED_FRAME_RATES = new Set(['24', '30', '60']);
-
-    function loadFrameRate() {
-      const stored = localStorage.getItem(FRAME_RATE_STORAGE_KEY);
-      frameRateSelect.value = ALLOWED_FRAME_RATES.has(stored) ? stored : '30';
-    }
-
     function currentFrameRate() {
       const value = Number(frameRateSelect.value);
       return value === 24 || value === 30 || value === 60 ? value : 30;
     }
-
-    loadFrameRate();
-    frameRateSelect.onchange = () => {
-      localStorage.setItem(FRAME_RATE_STORAGE_KEY, frameRateSelect.value);
-    };
 
     function formatBytes(bytes) {
       if (bytes < 1024) return `${bytes} B`;

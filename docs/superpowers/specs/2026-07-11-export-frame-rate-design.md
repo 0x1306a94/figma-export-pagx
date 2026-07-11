@@ -16,7 +16,7 @@
 
 1. 默认帧率改为 **30**。
 2. 用户可在面板手动选择 **24 / 30 / 60**（下拉，共用一个控件）。
-3. 选择经 `localStorage` 持久化。
+3. 每次打开面板默认为 30（不持久化：Figma 插件 UI 为 `data:` URL，`localStorage` 不可用）。
 4. PAGX 与 PAG 导出共用同一帧率值。
 5. 帧率作为导出参数向下传递（方案 1），不用模块级可变全局状态。
 
@@ -45,9 +45,7 @@ ui.html <select>
 
 - 位置：「导出」分区，两个导出按钮上方。
 - 控件：`<select>`，选项 `24` / `30` / `60`，默认选中 `30`。
-- `localStorage` key：`figma-motion-export-pagx:frameRate`。
-  - 启动：读存储；若不是 `24|30|60` 则回落 `30`。
-  - `change`：立刻写入。
+- **不持久化**：Figma 插件沙盒为 `data:` URL，无法使用 `localStorage`；每次打开面板均为 30。
 - 导出 busy 时：下拉 **disabled**（避免误解为会影响进行中的导出）。
 
 ### D3. 校验
@@ -96,8 +94,7 @@ collectPagMotionFrames(..., frameRate = MOTION_FRAME_RATE)
 
 ## 验收
 
-1. 面板打开时帧率默认为 30（或 localStorage 中的合法值）。
-2. 选择 24 / 30 / 60 后关闭再打开插件，选择仍保留。
-3. 导出 PAGX / PAG 时，输出中的 `frameRate` 与所选一致；有动画时 duration / keyframe 按该 fps 换算。
-4. 既有测试在显式 `frameRate: 60` 下仍通过；默认路径覆盖 30。
-5. 非法 `frameRate` 消息回落为 30。
+1. 面板打开时帧率默认为 30。
+2. 导出 PAGX / PAG 时，输出中的 `frameRate` 与所选一致；有动画时 duration / keyframe 按该 fps 换算。
+3. 既有测试在显式 `frameRate: 60` 下仍通过；默认路径覆盖 30。
+4. 非法 `frameRate` 消息回落为 30。
