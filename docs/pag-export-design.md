@@ -1,5 +1,7 @@
 # Figma Motion 直接导出 PAG 设计文档
 
+面向作者的图层制作规则（纯色 / 图片 / 文本）见：**[pag-authoring-rules.md](./pag-authoring-rules.md)**。
+
 ## 1. AE 插件导出 PAG 流程
 
 对照 `libpag/exporter`：
