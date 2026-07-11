@@ -26,6 +26,11 @@ import { encodePagFile } from './encode/encode-file';
 import { makeEllipse, makeRectangle, makeSolidFill, makeSolidStroke } from './encode/encode-shapes';
 import { ensureImageBytes, scaleFromImagePaint } from './image-bytes';
 import {
+  buildTextDocument,
+  pointTextAnchorPosition,
+  textLayoutModeFromAutoResize,
+} from './text-document';
+import {
   BlendMode,
   ColorBlack,
   ColorWhite,
@@ -44,10 +49,8 @@ import {
   PagProperty,
   PagShapeElement,
   PagShapeLayer,
-  PagTextDocument,
   PagTransform2D,
   PagVectorComposition,
-  ParagraphJustification,
   PathVerb,
   staticProperty,
   defaultTransform2D,
@@ -471,28 +474,34 @@ function mapTextLayer(
     }
   }
 
-  const sourceText: PagTextDocument = {
-    applyFill: true,
-    applyStroke: false,
-    boxText: false,
-    fauxBold: false,
-    fauxItalic: false,
-    strokeOverFill: true,
-    baselineShift: 0,
-    firstBaseLine: 0,
-    boxTextPos: { x: 0, y: 0 },
-    boxTextSize: { x: 0, y: 0 },
-    fillColor,
-    fontSize,
-    strokeColor: ColorBlack,
-    strokeWidth: 1,
-    text: node.characters,
-    justification: ParagraphJustification.LeftJustify,
-    leading: 0,
-    tracking: 0,
-    fontFamily,
-    fontStyle,
-  };
+  const mode = textLayoutModeFromAutoResize(node.textAutoResize);
+  if (mode === 'point') {
+    if (base.transform.position.animatable) {
+      addDiagnostic(
+        ctx.diagnostics,
+        'warning',
+        'TEXT_POINT_MOTION',
+        '点文本含位移动画时暂不覆盖基线锚点，仍用中心锚点采样',
+        node.id,
+      );
+    } else {
+      const { left, top } = parent ? layoutLeftTop(node, parent) : { left: 0, top: 0 };
+      const align =
+        typeof node.textAlignHorizontal === 'string' ? node.textAlignHorizontal : 'LEFT';
+      const override = pointTextAnchorPosition({
+        left,
+        top,
+        width: size.width,
+        height: size.height,
+        fontSize,
+        align,
+      });
+      base.transform.anchorPoint = staticProperty(override.anchor);
+      base.transform.position = staticProperty(override.position);
+    }
+  }
+
+  const sourceText = buildTextDocument(node, size, ctx.diagnostics, fillColor);
 
   // Text color opacity goes into layer opacity if not already animated
   if (fillOpacity < OPAQUE && base.transform.opacity.animatable === false) {
@@ -999,7 +1008,12 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
     }
   } else if (root.type === 'TEXT') {
     const layer = mapTextLayer(root, null, ctx);
-    if (!layer.transform.position.animatable) {
+    // 点文本已在 mapTextLayer 按基线放置；框文本 root 仍用中心锚点对齐 composition
+    if (
+      !layer.transform.position.animatable
+      && layer.type === LayerType.Text
+      && layer.sourceText.boxText
+    ) {
       const pivot = motionPivotForExport(root, width, height);
       layer.transform.position = staticProperty({ x: pivot.x, y: pivot.y });
       layer.transform.anchorPoint = staticProperty({ x: pivot.x, y: pivot.y });

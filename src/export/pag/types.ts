@@ -88,6 +88,10 @@ export enum ParagraphJustification {
   LeftJustify = 0,
   CenterJustify = 1,
   RightJustify = 2,
+  FullJustifyLastLineLeft = 3,
+  FullJustifyLastLineRight = 4,
+  FullJustifyLastLineCenter = 5,
+  FullJustifyLastLineFull = 6,
 }
 
 export type PagPathData = {

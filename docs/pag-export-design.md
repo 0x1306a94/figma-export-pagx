@@ -79,6 +79,7 @@ figma-reader / path-detect / figma-motion 采样
 | 嵌套 | Frame/Group → PreComposeLayer + 子 VectorComposition |
 | Mask | `isMask` 几何 → 被遮罩层 `masks[]`；alpha/luminance 无法忠实时 warning |
 | 图片 | `imageHash` → 原图 PNG/JPEG 直通 `ImageBytesV3`；同 hash 去重；FILL/FIT/CROP→Transform scale（对齐 AE footage，不强制 WebP） |
+| 文本 | 按 [PAG 点/框规则](https://pag.io/docs/editable-text.html)：`WIDTH_AND_HEIGHT`→点文本（基线锚点）；`NONE`/`HEIGHT`/`TRUNCATE`→框文本（`boxTextPos=(0,0)`，`boxTextSize=AABB`，`firstBaseLine≈0.8×fontSize`）；映射水平对齐/行距/字距；框文本可能缩字号或垂直居中 |
 
 ### 模块
 
