@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 360, height: 560 });
+figma.showUI(__html__, { width: 360, height: 420 });
 
 import { exportPagx, exportPag } from './export';
 import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
@@ -6,8 +6,7 @@ import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-
 type PluginMessage =
   | { type: 'export-pagx' }
   | { type: 'export-pag' }
-  | { type: 'refresh-motion-anchor' }
-  | { type: 'cancel' };
+  | { type: 'refresh-motion-anchor' };
 
 function sendSelectionMotionData(): void {
   const selection = figma.currentPage.selection;
@@ -32,11 +31,6 @@ figma.on('selectionchange', sendSelectionMotionData);
 sendSelectionMotionData();
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
-  if (msg.type === 'cancel') {
-    figma.closePlugin();
-    return;
-  }
-
   if (msg.type === 'refresh-motion-anchor') {
     const selection = figma.currentPage.selection;
     let refreshed = 0;

@@ -11,7 +11,16 @@
       color: #111;
     }
     h2 { margin: 0 0 8px; font-size: 14px; }
-    p { margin: 0 0 12px; color: #666; }
+    .lead { margin: 0 0 16px; color: #666; }
+    .section { margin-bottom: 16px; }
+    .section-label {
+      margin: 0 0 8px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #888;
+    }
     button {
       width: 100%;
       padding: 8px 12px;
@@ -29,21 +38,17 @@
     #export-pag {
       background: #111;
       color: #fff;
-      margin-bottom: 8px;
+      margin-bottom: 0;
     }
     #export-pag:disabled { opacity: 0.6; cursor: default; }
     #refresh-motion-anchor {
       background: #0d9488;
       color: #fff;
-      margin-bottom: 8px;
+      margin-bottom: 0;
     }
     #refresh-motion-anchor:disabled { opacity: 0.6; cursor: default; }
-    #cancel {
-      background: #f0f0f0;
-      color: #333;
-    }
     #motion-warning {
-      margin: 0 0 12px;
+      margin: 0 0 8px;
       padding: 8px;
       background: #fff7e6;
       color: #8a6100;
@@ -52,7 +57,7 @@
       font-size: 11px;
     }
     #meta {
-      margin: 12px 0;
+      margin: 12px 0 0;
       padding: 8px;
       background: #f5f5f5;
       border-radius: 6px;
@@ -82,7 +87,7 @@
     }
     #refresh-status {
       display: none;
-      margin: 0 0 12px;
+      margin: 8px 0 0;
       padding: 8px;
       background: #ecfdf5;
       color: #047857;
@@ -90,12 +95,30 @@
       font-size: 11px;
     }
     #motion-panel {
-      margin-top: 12px;
+      border-top: 1px solid #eee;
+      padding-top: 12px;
     }
-    #motion-panel h3 {
-      margin: 0 0 6px;
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-row span {
       font-size: 12px;
-      font-weight: 600;
+      color: #333;
+    }
+    .toggle-row input {
+      margin: 0;
+    }
+    #motion-body {
+      display: none;
+      margin-top: 8px;
+    }
+    #motion-body.visible {
+      display: block;
     }
     #motion-hint {
       margin: 0;
@@ -117,34 +140,56 @@
 </head>
 <body>
   <h2>导出 PAGX / PAG</h2>
-  <p>选择一个 Frame 或图层作为 root，导出为 .pagx 或 .pag。</p>
-  <div id="motion-warning">
-    如果存在手动调整过锚点的节点，请先将 Figma Motion 时间线拖到该节点动画起始点稍后，选中该节点并点击刷新锚点缓存。全部刷新后，再回到起始位置选中 Frame 导出。
+  <p class="lead">选择一个 Frame 或图层作为 root，导出为 .pagx 或 .pag。</p>
+
+  <div class="section">
+    <div class="section-label">准备</div>
+    <div id="motion-warning">
+      如果存在手动调整过锚点的节点，请先将 Figma Motion 时间线拖到该节点动画起始点稍后，选中该节点并点击刷新锚点缓存。全部刷新后，再回到起始位置选中 Frame 导出。
+    </div>
+    <button id="refresh-motion-anchor">刷新锚点缓存</button>
+    <div id="refresh-status"></div>
   </div>
-  <button id="refresh-motion-anchor">刷新锚点缓存</button>
-  <div id="refresh-status"></div>
-  <button id="export">导出 PAGX</button>
-  <button id="export-pag">导出 PAG</button>
-  <button id="cancel">关闭</button>
-  <div id="meta"></div>
-  <div id="error"></div>
-  <div id="diagnostics"></div>
-  <div id="motion-panel">
-    <h3>动画数据</h3>
-    <p id="motion-hint">选中一个节点后显示 JSON</p>
-    <pre id="motion-json"></pre>
+
+  <div class="section">
+    <div class="section-label">导出</div>
+    <button id="export">导出 PAGX</button>
+    <button id="export-pag">导出 PAG</button>
+    <div id="meta"></div>
+    <div id="error"></div>
+    <div id="diagnostics"></div>
   </div>
+
+  <div id="motion-panel" class="section">
+    <div class="section-label">开发者</div>
+    <label class="toggle-row">
+      <span>显示动画数据</span>
+      <input type="checkbox" id="motion-toggle" />
+    </label>
+    <div id="motion-body">
+      <p id="motion-hint">选中一个节点后显示 JSON</p>
+      <pre id="motion-json"></pre>
+    </div>
+  </div>
+
   <script>
     const exportButton = document.getElementById('export');
     const exportPagButton = document.getElementById('export-pag');
     const refreshMotionAnchorButton = document.getElementById('refresh-motion-anchor');
-    const cancelButton = document.getElementById('cancel');
     const metaEl = document.getElementById('meta');
     const errorEl = document.getElementById('error');
     const refreshStatusEl = document.getElementById('refresh-status');
     const diagnosticsEl = document.getElementById('diagnostics');
+    const motionToggleEl = document.getElementById('motion-toggle');
+    const motionBodyEl = document.getElementById('motion-body');
     const motionHintEl = document.getElementById('motion-hint');
     const motionJsonEl = document.getElementById('motion-json');
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
 
     function showError(message) {
       errorEl.style.display = 'block';
@@ -166,6 +211,11 @@
       exportPagButton.disabled = busy;
       exportButton.textContent = busy ? '导出中...' : '导出 PAGX';
       exportPagButton.textContent = busy ? '导出中...' : '导出 PAG';
+    }
+
+    function setRefreshBusy(busy) {
+      refreshMotionAnchorButton.disabled = busy;
+      refreshMotionAnchorButton.textContent = busy ? '刷新中...' : '刷新锚点缓存';
     }
 
     function renderDiagnostics(items) {
@@ -212,6 +262,10 @@
       URL.revokeObjectURL(url);
     }
 
+    motionToggleEl.onchange = () => {
+      motionBodyEl.classList.toggle('visible', motionToggleEl.checked);
+    };
+
     exportButton.onclick = () => {
       clearError();
       setExportBusy(true);
@@ -226,41 +280,36 @@
 
     refreshMotionAnchorButton.onclick = () => {
       clearError();
-      refreshMotionAnchorButton.disabled = true;
-      refreshMotionAnchorButton.textContent = '刷新中...';
+      setRefreshBusy(true);
       parent.postMessage({ pluginMessage: { type: 'refresh-motion-anchor' } }, '*');
-    };
-
-    cancelButton.onclick = () => {
-      parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
     };
 
     window.onmessage = (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
 
-      setExportBusy(false);
-      refreshMotionAnchorButton.disabled = false;
-      refreshMotionAnchorButton.textContent = '刷新锚点缓存';
-
       if (msg.type === 'export-error') {
+        setExportBusy(false);
         showError(msg.error);
         return;
       }
 
       if (msg.type === 'export-result') {
+        setExportBusy(false);
         clearError();
+        const size = new Blob([msg.xml]).size;
         metaEl.style.display = 'block';
-        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个`;
+        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个，.pagx ${formatBytes(size)}`;
         renderDiagnostics(msg.diagnostics);
         downloadPagx(msg.xml, msg.fileName);
         return;
       }
 
       if (msg.type === 'export-pag-result') {
+        setExportBusy(false);
         clearError();
         metaEl.style.display = 'block';
-        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个（.pag ${msg.bytes.length} bytes）`;
+        metaEl.textContent = `画布 ${msg.width} × ${msg.height}，节点 ${msg.nodeCount} 个，.pag ${formatBytes(msg.bytes.length)}`;
         renderDiagnostics(msg.diagnostics);
         downloadPag(msg.bytes, msg.fileName);
         return;
@@ -272,6 +321,7 @@
       }
 
       if (msg.type === 'refresh-motion-anchor-result') {
+        setRefreshBusy(false);
         showRefreshStatus(msg.message);
       }
     };
