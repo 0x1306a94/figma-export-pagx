@@ -1,7 +1,8 @@
 {
   "name": "figma-motion-export-pagx",
   "version": "1.0.0",
-  "description": "Your Figma Plugin",
+  "private": true,
+  "description": "Figma Motion to PAGX / PAG",
   "main": "code.js",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && esbuild src/code.ts --bundle --target=es2020 --outfile=code.js",
@@ -10,12 +11,16 @@
     "lint:fix": "eslint . --fix",
     "watch": "esbuild src/code.ts --bundle --target=es2020 --outfile=code.js --watch"
   },
-  "author": "",
-  "license": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0x1306a94/figma-motion-export-pagx.git"
+  },
+  "author": "0x1306a94",
+  "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@figma/eslint-plugin-figma-plugins": "*",
-    "@figma/plugin-typings": "*",
+    "@figma/eslint-plugin-figma-plugins": "^1.0.0",
+    "@figma/plugin-typings": "^1.130.0",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.4",
     "typescript": "^5.9.3",
