@@ -3,6 +3,8 @@
 *.log.*
 node_modules
 
+.superpowers/
+
 out/
 dist/
 code.js
