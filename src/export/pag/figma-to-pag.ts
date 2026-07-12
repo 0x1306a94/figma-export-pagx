@@ -39,10 +39,13 @@ import {
   LayerType,
   MaskMode,
   OPAQUE,
+  PagBlurDimensions,
+  PagEffect,
   PagFile,
   PagImageBytes,
   PagKeyframe,
   PagLayer,
+  PagLayerStyle,
   PagMaskData,
   PagPathData,
   PagPoint,
@@ -119,6 +122,256 @@ function allocMaskId(ctx: PagExportContext): number {
 
 function opacityToPag(opacity: number): number {
   return Math.round(Math.max(0, Math.min(1, opacity)) * 255);
+}
+
+function normalizedDegrees(value: number): number {
+  const normalized = value % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function roundEffectValue(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+type EffectRadiusSample = {
+  frame: number;
+  value: number;
+  easing: MotionEasing | VariableAlias;
+};
+
+function pagEffectEasing(
+  easing: MotionEasing | VariableAlias,
+  diagnostics: Diagnostic[],
+  nodeId: string,
+): Pick<PagKeyframe<number>, 'interpolationType' | 'bezierOut' | 'bezierIn'> {
+  if (easing.type === 'VARIABLE_ALIAS') {
+    addDiagnostic(
+      diagnostics,
+      'warning',
+      'PAG_EFFECT_VARIABLE_EASING_FALLBACK',
+      'PAG 效果动画暂不支持变量 easing，已降级为 Linear',
+      nodeId,
+    );
+    return { interpolationType: KeyframeInterpolationType.Linear };
+  }
+
+  const bezier = (x1: number, y1: number, x2: number, y2: number) => ({
+    interpolationType: KeyframeInterpolationType.Bezier,
+    bezierOut: [{ x: x1, y: y1 }],
+    bezierIn: [{ x: x2, y: y2 }],
+  });
+  switch (easing.type) {
+    case 'HOLD':
+      return { interpolationType: KeyframeInterpolationType.Hold };
+    case 'CUSTOM_CUBIC_BEZIER': {
+      const curve = easing.easingFunctionCubicBezier;
+      return curve
+        ? bezier(curve.x1, curve.y1, curve.x2, curve.y2)
+        : { interpolationType: KeyframeInterpolationType.Linear };
+    }
+    case 'EASE_IN': return bezier(0.42, 0, 1, 1);
+    case 'EASE_OUT': return bezier(0, 0, 0.58, 1);
+    case 'EASE_IN_AND_OUT': return bezier(0.42, 0, 0.58, 1);
+    case 'EASE_IN_BACK': return bezier(0.36, 0, 0.66, -0.56);
+    case 'EASE_OUT_BACK': return bezier(0.34, 1.56, 0.64, 1);
+    case 'EASE_IN_AND_OUT_BACK': return bezier(0.68, -0.6, 0.32, 1.6);
+    case 'GENTLE': return bezier(0.4, 0, 0.2, 1);
+    case 'QUICK': return bezier(0.4, 0, 1, 1);
+    case 'BOUNCY': return bezier(0.34, 1.56, 0.64, 1);
+    case 'SLOW': return bezier(0, 0, 0.2, 1);
+    case 'CUSTOM_SPRING':
+      addDiagnostic(
+        diagnostics,
+        'warning',
+        'PAG_EFFECT_SPRING_EASING_FALLBACK',
+        'PAG 效果动画暂不支持 Spring easing，已降级为 Linear',
+        nodeId,
+      );
+      return { interpolationType: KeyframeInterpolationType.Linear };
+    case 'LINEAR':
+    default:
+      return { interpolationType: KeyframeInterpolationType.Linear };
+  }
+}
+
+function animatedEffectRadius(
+  node: SceneNode,
+  effectIndex: number,
+  fallbackRadius: number,
+  diagnostics: Diagnostic[],
+  frameRate: number,
+): { property: PagProperty<number>; durationFrames: number } {
+  if (!isMotionNode(node)) {
+    return { property: staticProperty(fallbackRadius), durationFrames: 0 };
+  }
+  const binding = node.animations.effects?.[effectIndex]?.RADIUS;
+  if (!binding) {
+    return { property: staticProperty(fallbackRadius), durationFrames: 0 };
+  }
+
+  const baseValue = binding.baseValue.type === 'FLOAT'
+    ? binding.baseValue.value
+    : fallbackRadius;
+  const samples: EffectRadiusSample[] = [];
+  for (const track of binding.tracks) {
+    if (!['SET', 'OFFSET', 'SCALE'].includes(track.keyframeOperation)) {
+      addDiagnostic(
+        diagnostics,
+        'warning',
+        'PAG_EFFECT_KEYFRAME_OP_FALLBACK',
+        `PAG 模糊动画暂不支持 ${track.keyframeOperation} 轨道`,
+        node.id,
+      );
+      continue;
+    }
+    for (const keyframe of track.keyframes) {
+      if (keyframe.value.type !== 'FLOAT') {
+        continue;
+      }
+      let value = keyframe.value.value;
+      if (track.keyframeOperation === 'OFFSET') {
+        value = baseValue + value;
+      } else if (track.keyframeOperation === 'SCALE') {
+        value = baseValue * value;
+      }
+      samples.push({
+        frame: Math.max(0, Math.round(keyframe.timelinePosition * frameRate)),
+        value: Math.max(0, value),
+        easing: keyframe.easing,
+      });
+    }
+  }
+  samples.sort((left, right) => left.frame - right.frame);
+  const deduped = samples.filter((sample, index) => (
+    index === samples.length - 1 || sample.frame !== samples[index + 1].frame
+  ));
+  if (deduped.length < 2) {
+    return {
+      property: staticProperty(deduped[0]?.value ?? fallbackRadius),
+      durationFrames: deduped[0]?.frame ?? 0,
+    };
+  }
+  if (deduped[0].frame > 0) {
+    deduped.unshift({
+      frame: 0,
+      value: baseValue,
+      easing: { type: 'LINEAR' },
+    });
+  }
+
+  const keyframes: PagKeyframe<number>[] = [];
+  for (let index = 0; index < deduped.length - 1; index += 1) {
+    const start = deduped[index];
+    const end = deduped[index + 1];
+    keyframes.push({
+      startTime: start.frame,
+      endTime: end.frame,
+      startValue: start.value,
+      endValue: end.value,
+      ...pagEffectEasing(start.easing, diagnostics, node.id),
+    });
+  }
+  return {
+    property: { animatable: true, keyframes },
+    durationFrames: deduped[deduped.length - 1].frame,
+  };
+}
+
+export function mapNodeEffects(
+  node: SceneNode,
+  diagnostics: Diagnostic[],
+  frameRate: number = MOTION_FRAME_RATE,
+): { effects: PagEffect[]; layerStyles: PagLayerStyle[]; durationFrames: number } {
+  const effects: PagEffect[] = [];
+  const layerStyles: PagLayerStyle[] = [];
+  let durationFrames = 0;
+  if (!('effects' in node)) {
+    return { effects, layerStyles, durationFrames };
+  }
+
+  for (const [effectIndex, effect] of node.effects.entries()) {
+    if (effect.visible === false) {
+      continue;
+    }
+    if (effect.type === 'LAYER_BLUR') {
+      if ('blurType' in effect && effect.blurType === 'PROGRESSIVE') {
+        addDiagnostic(
+          diagnostics,
+          'warning',
+          'PAG_PROGRESSIVE_BLUR_FALLBACK',
+          'PAG 不支持渐进模糊，已降级为均匀模糊',
+          node.id,
+        );
+      }
+      const radius = animatedEffectRadius(
+        node,
+        effectIndex,
+        Math.max(0, effect.radius),
+        diagnostics,
+        frameRate,
+      );
+      durationFrames = Math.max(durationFrames, radius.durationFrames);
+      effects.push({
+        kind: 'fastBlur',
+        blurriness: radius.property,
+        blurDimensions: staticProperty(PagBlurDimensions.All),
+        repeatEdgePixels: staticProperty(true),
+        effectOpacity: staticProperty(OPAQUE),
+      });
+      continue;
+    }
+    if (effect.type === 'DROP_SHADOW') {
+      const offsetX = Number.isFinite(effect.offset.x) ? effect.offset.x : 0;
+      const offsetY = Number.isFinite(effect.offset.y) ? effect.offset.y : 0;
+      const distance = Math.hypot(offsetX, offsetY);
+      const angle = distance === 0
+        ? 0
+        : normalizedDegrees((Math.atan2(-offsetY, offsetX) * 180) / Math.PI + 180);
+      const figmaSpread = Math.max(0, effect.spread ?? 0);
+      const size = Math.max(0, effect.radius) + figmaSpread;
+      if (effect.blendMode !== 'NORMAL') {
+        addDiagnostic(
+          diagnostics,
+          'warning',
+          'PAG_DROP_SHADOW_BLEND_MODE_FALLBACK',
+          `PAG 阴影暂不支持混合模式 ${effect.blendMode}，已降级为 Normal`,
+          node.id,
+        );
+      }
+      layerStyles.push({
+        kind: 'dropShadow',
+        blendMode: staticProperty(BlendMode.Normal),
+        color: staticProperty({
+          red: Math.round(effect.color.r * 255),
+          green: Math.round(effect.color.g * 255),
+          blue: Math.round(effect.color.b * 255),
+        }),
+        opacity: staticProperty(opacityToPag(effect.color.a)),
+        angle: staticProperty(roundEffectValue(angle)),
+        distance: staticProperty(roundEffectValue(distance)),
+        size: staticProperty(roundEffectValue(size)),
+        spread: staticProperty(roundEffectValue(size > 0 ? figmaSpread / size : 0)),
+      });
+      continue;
+    }
+    addDiagnostic(
+      diagnostics,
+      'warning',
+      'PAG_UNSUPPORTED_EFFECT',
+      `PAG 暂不支持效果 ${effect.type}`,
+      node.id,
+    );
+  }
+  if (effects.length > 0 && layerStyles.length > 0) {
+    addDiagnostic(
+      diagnostics,
+      'warning',
+      'PAG_EFFECT_ORDER_DIFFERENCE',
+      'PAG 会先合成图层样式再应用图层效果，可能与 Figma 的效果顺序不同',
+      node.id,
+    );
+  }
+  return { effects, layerStyles, durationFrames };
 }
 
 function parseHexColor(hex: string): { color: { red: number; green: number; blue: number }; opacity: number } {
@@ -348,6 +601,8 @@ function layerBase(
   nameOverride?: string,
 ): Omit<PagShapeLayer, 'type' | 'contents'> {
   const resolvedMotion = motion ?? readMotionForNode(node, parent, width, height, ctx);
+  const mappedEffects = mapNodeEffects(node, ctx.diagnostics, ctx.frameRate);
+  ctx.durationFrames = Math.max(ctx.durationFrames, mappedEffects.durationFrames);
   return {
     id: allocLayerId(ctx),
     name: nameOverride ?? exportLayerName(node.name),
@@ -361,6 +616,8 @@ function layerBase(
     trackMatteType: 0,
     transform: buildTransform(node, parent, width, height, ctx, resolvedMotion),
     masks: [],
+    effects: mappedEffects.effects,
+    layerStyles: mappedEffects.layerStyles,
   };
 }
 
@@ -866,6 +1123,8 @@ async function mapContainerAsComposition(
         position: { x: size.width / 2, y: size.height / 2 },
       }),
       masks: [],
+      effects: [],
+      layerStyles: [],
       type: LayerType.Shape,
       contents: selfContents,
     });

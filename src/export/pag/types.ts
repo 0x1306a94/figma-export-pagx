@@ -44,6 +44,12 @@ export enum BlendMode {
   Normal = 0,
 }
 
+export enum PagBlurDimensions {
+  All = 0,
+  Horizontal = 1,
+  Vertical = 2,
+}
+
 export enum TrackMatteType {
   None = 0,
 }
@@ -130,6 +136,29 @@ export type PagMaskData = {
   maskExpansion: PagProperty<number>;
 };
 
+export type PagFastBlurEffect = {
+  kind: 'fastBlur';
+  blurriness: PagProperty<number>;
+  blurDimensions: PagProperty<PagBlurDimensions>;
+  repeatEdgePixels: PagProperty<boolean>;
+  effectOpacity: PagProperty<PagOpacity>;
+};
+
+export type PagEffect = PagFastBlurEffect;
+
+export type PagDropShadowStyle = {
+  kind: 'dropShadow';
+  blendMode: PagProperty<BlendMode>;
+  color: PagProperty<PagColor>;
+  opacity: PagProperty<PagOpacity>;
+  angle: PagProperty<number>;
+  distance: PagProperty<number>;
+  size: PagProperty<number>;
+  spread: PagProperty<number>;
+};
+
+export type PagLayerStyle = PagDropShadowStyle;
+
 export type PagShapeElement =
   | {
       kind: 'rectangle';
@@ -214,6 +243,8 @@ export type PagLayerBase = {
   trackMatteType: TrackMatteType;
   transform: PagTransform2D;
   masks: PagMaskData[];
+  effects: PagEffect[];
+  layerStyles: PagLayerStyle[];
 };
 
 export type PagShapeLayer = PagLayerBase & {

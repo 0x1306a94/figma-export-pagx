@@ -33,8 +33,10 @@ export enum TagCode {
   ImageBytesV3 = 49,
   LayerAttributesV2 = 52,
   MarkerList = 53,
+  FastBlurEffect = 60,
   LayerAttributesV3 = 62,
   TextSourceV2 = 64,
+  DropShadowStyleV2 = 65,
   TextSourceV3 = 68,
   MaskBlockV2 = 84,
 }

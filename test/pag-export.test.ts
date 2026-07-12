@@ -12,9 +12,16 @@ import {
 import { EncodeStream } from '../src/export/pag/encode/encode-stream';
 import { encodePagFile } from '../src/export/pag/encode/encode-file';
 import { TagCode } from '../src/export/pag/encode/tag-code';
+import { writeEffects } from '../src/export/pag/encode/encode-effects';
+import { writeLayerStyles } from '../src/export/pag/encode/encode-layer-styles';
 import { collectPagMotionFrames } from '../src/export/figma-motion';
 import { exportLayerName, parseSolidMarker } from '../src/export/solid-marker';
-import { keyframesFromValues, opacityToPag, svgToPagPath } from '../src/export/pag/figma-to-pag';
+import {
+  keyframesFromValues,
+  mapNodeEffects,
+  opacityToPag,
+  svgToPagPath,
+} from '../src/export/pag/figma-to-pag';
 import { readEncodedImageSize, scaleFromImagePaint } from '../src/export/pag/image-bytes';
 import { KeyframeInterpolationType, PathVerb } from '../src/export/pag/types';
 import type { Diagnostic } from '../src/export/types';
@@ -116,6 +123,121 @@ function testOpacityAndPath(): void {
   const path = svgToPagPath('M 0 0 L 10 0 L 10 10 Z');
   assert.equal(path.verbs[0], PathVerb.MoveTo);
   assert.equal(path.verbs[path.verbs.length - 1], PathVerb.Close);
+}
+
+function testMapNodeEffects(): void {
+  const diagnostics: Diagnostic[] = [];
+  const node = {
+    id: '38:13',
+    animations: {
+      effects: {
+        0: {
+          RADIUS: {
+            baseValue: { type: 'FLOAT', value: 21.2 },
+            timelineDuration: 2,
+            tracks: [{
+              id: 'KeyframeTrackId:46:117',
+              keyframeOperation: 'SET',
+              keyframes: [{
+                id: '46:118',
+                easing: {
+                  type: 'CUSTOM_CUBIC_BEZIER',
+                  easingFunctionCubicBezier: { x1: 0.5, y1: 0, x2: 0.5, y2: 1 },
+                },
+                value: { type: 'FLOAT', value: 21.2 },
+                timelinePosition: 0.007398,
+              }, {
+                id: '46:119',
+                easing: {
+                  type: 'CUSTOM_CUBIC_BEZIER',
+                  easingFunctionCubicBezier: { x1: 0.5, y1: 0, x2: 0.5, y2: 1 },
+                },
+                value: { type: 'FLOAT', value: 60 },
+                timelinePosition: 0.612,
+              }],
+            }],
+          },
+        },
+      },
+    },
+    effects: [{
+      type: 'LAYER_BLUR',
+      visible: true,
+      radius: 20,
+      blurType: 'PROGRESSIVE',
+    }, {
+      type: 'DROP_SHADOW',
+      visible: true,
+      radius: 8,
+      spread: 2,
+      offset: { x: 3, y: 4 },
+      color: { r: 0.2, g: 0.4, b: 0.6, a: 0.5 },
+      blendMode: 'NORMAL',
+      showShadowBehindNode: false,
+    }, {
+      type: 'LAYER_BLUR',
+      visible: false,
+      radius: 99,
+    }],
+  } as unknown as SceneNode;
+
+  const mapped = mapNodeEffects(node, diagnostics);
+  assert.equal(mapped.effects.length, 1);
+  assert.equal(mapped.effects[0].kind, 'fastBlur');
+  assert.deepEqual(mapped.effects[0].repeatEdgePixels, staticProperty(true));
+  assert.equal(mapped.effects[0].blurriness.animatable, true);
+  if (mapped.effects[0].blurriness.animatable) {
+    assert.deepEqual(mapped.effects[0].blurriness.keyframes, [{
+      startTime: 0,
+      endTime: 18,
+      startValue: 21.2,
+      endValue: 60,
+      interpolationType: KeyframeInterpolationType.Bezier,
+      bezierOut: [{ x: 0.5, y: 0 }],
+      bezierIn: [{ x: 0.5, y: 1 }],
+    }]);
+  }
+  assert.equal(mapped.durationFrames, 18);
+  assert.ok(diagnostics.some((item) => item.code === 'PAG_PROGRESSIVE_BLUR_FALLBACK'));
+
+  assert.equal(mapped.layerStyles.length, 1);
+  const shadow = mapped.layerStyles[0];
+  assert.equal(shadow.kind, 'dropShadow');
+  assert.deepEqual(shadow.distance, staticProperty(5));
+  assert.deepEqual(shadow.angle, staticProperty(126.8699));
+  assert.deepEqual(shadow.size, staticProperty(10));
+  assert.deepEqual(shadow.spread, staticProperty(0.2));
+  assert.deepEqual(shadow.color, staticProperty({ red: 51, green: 102, blue: 153 }));
+  assert.deepEqual(shadow.opacity, staticProperty(128));
+}
+
+function firstTagCode(bytes: Uint8Array): number {
+  return (bytes[0] | (bytes[1] << 8)) >> 6;
+}
+
+function testEffectAndLayerStyleTags(): void {
+  const effectStream = new EncodeStream();
+  writeEffects(effectStream, [{
+    kind: 'fastBlur',
+    blurriness: staticProperty(20),
+    blurDimensions: staticProperty(0),
+    repeatEdgePixels: staticProperty(false),
+    effectOpacity: staticProperty(OPAQUE),
+  }]);
+  assert.equal(firstTagCode(effectStream.release()), TagCode.FastBlurEffect);
+
+  const styleStream = new EncodeStream();
+  writeLayerStyles(styleStream, [{
+    kind: 'dropShadow',
+    blendMode: staticProperty(BlendMode.Normal),
+    color: staticProperty({ red: 51, green: 102, blue: 153 }),
+    opacity: staticProperty(128),
+    angle: staticProperty(126.8699),
+    distance: staticProperty(5),
+    size: staticProperty(10),
+    spread: staticProperty(0.2),
+  }]);
+  assert.equal(firstTagCode(styleStream.release()), TagCode.DropShadowStyleV2);
 }
 
 function testKeyframes(): void {
@@ -519,6 +641,8 @@ function testImageLayerPagEncode(): void {
 testEncodeStreamBasics();
 testMinimalShapePag();
 testOpacityAndPath();
+testMapNodeEffects();
+testEffectAndLayerStyleTags();
 testKeyframes();
 testMaskAndMotionPag();
 testSizeAnimationUsesShapeSizeNotCenterScale();

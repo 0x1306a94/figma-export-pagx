@@ -266,10 +266,11 @@ export function floatConfig(
 export function opacityConfig(
   attributeType: AttributeType,
   get: () => unknown,
+  defaultValue: number = OPAQUE,
 ): AttributeConfig {
   return {
     attributeType,
-    defaultValue: OPAQUE,
+    defaultValue,
     get,
     writeValue: (stream, value) => stream.writeUint8(value as number),
     writeValueList: (stream, values) => {
@@ -317,6 +318,24 @@ export function uint8Config(
     defaultValue,
     get,
     writeValue: (stream, value) => stream.writeUint8(value as number),
+  };
+}
+
+export function booleanConfig(
+  attributeType: AttributeType,
+  defaultValue: boolean,
+  get: () => unknown,
+): AttributeConfig {
+  return {
+    attributeType,
+    defaultValue,
+    get,
+    writeValue: (stream, value) => stream.writeBoolean(value as boolean),
+    writeValueList: (stream, values) => {
+      for (const value of values) {
+        stream.writeBitBoolean(value as boolean);
+      }
+    },
   };
 }
 

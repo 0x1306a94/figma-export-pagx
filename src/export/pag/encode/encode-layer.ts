@@ -33,6 +33,8 @@ import {
 import { writeColor, writeTime } from './data-types';
 import { EncodeStream } from './encode-stream';
 import { writeShapes } from './encode-shapes';
+import { writeEffects } from './encode-effects';
+import { writeLayerStyles } from './encode-layer-styles';
 import { TagCode, writeEndTag, writeTagHeader } from './tag-code';
 
 export type EncodeContext = {
@@ -207,6 +209,8 @@ export function writeLayer(stream: EncodeStream, layer: PagLayer, ctx: EncodeCon
     writeMask(stream, mask);
   }
 
+  writeEffects(stream, layer.effects ?? []);
+  writeLayerStyles(stream, layer.layerStyles ?? []);
   writeTransform2D(stream, layer.transform);
 
   switch (layer.type) {
