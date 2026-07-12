@@ -55,6 +55,8 @@ const layers = pagFile.getLayersByName('Brand');
 
 Fill opacity × 图层 opacity → 层 `Transform2D.opacity`；`solidColor` 只写 RGB。
 
+Fill blend mode 会映射到 SolidLayer 的图层混合模式；例如 `LINEAR_DODGE` 导出为 PAG `Add`。PAG 不支持的模式会中断导出。
+
 ### 1.6 多 Fill 中的自动 SolidLayer
 
 `#solid` 仍是单独纯色图层导出为 SolidLayer 的显式标志。普通单 Fill 节点即使是纯色矩形，也仍导出为 ShapeLayer。

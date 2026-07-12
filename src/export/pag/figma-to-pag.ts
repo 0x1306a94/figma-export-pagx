@@ -990,6 +990,7 @@ function assertSolidEligible(node: SceneNode, exportName: string): {
   height: number;
   solidColor: { red: number; green: number; blue: number };
   fillOpacity: number;
+  fillBlendMode: BlendMode;
 } {
   const label = exportName || node.name;
   const geometry = solidEligibleGeometry(node);
@@ -1028,6 +1029,7 @@ function assertSolidEligible(node: SceneNode, exportName: string): {
     height: geometry.height,
     solidColor: solid.color,
     fillOpacity: solid.opacity,
+    fillBlendMode: mapFigmaBlendMode((fills[0] as SolidPaint).blendMode ?? 'NORMAL', label),
   };
 }
 
@@ -1050,6 +1052,7 @@ function mapSolidLayer(
     motion,
     exportName,
   );
+  base.blendMode = eligible.fillBlendMode;
   if (motion?.sizeAnimated) {
     base.transform.scale = scaleFromMotionAndSizeFrames(
       motion,
