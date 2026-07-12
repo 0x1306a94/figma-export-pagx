@@ -1,6 +1,19 @@
 # figma-motion-export-pagx
 
-Figma 插件：将选中节点静态导出为 PAGX（`.pagx`）。第一版不含动画。
+Figma 插件：包含 PAG（`.pag`）与 PAGX（`.pagx`）两套独立导出实现。
+
+## PAG 与 PAGX 边界（严格遵守）
+
+- PAG（`.pag`）与 PAGX（`.pagx`）是两套完全独立的格式、代码路径和验证流程，不得混用。
+- 用户讨论 PAG 时，只检查 PAG 导出代码及 libpag 的 PAG 编解码、渲染实现；禁止自动搜索、引用或修改 PAGX 代码，除非用户明确要求比较两者。
+- 用户讨论 PAGX 时，只检查 PAGX 导出代码及 PAGX 规范、运行时；禁止自动套用 PAG 二进制编码实现。
+- `pagx` CLI 只能处理 `.pagx`，不能验证、解析或渲染 `.pag`；任何 PAG 任务都禁止使用 `pagx verify`。
+- 用户只说“导出”但未指明格式时，先根据当前对话和文件扩展名判断；仍有歧义再询问，不默认选择 PAGX。
+
+| 格式 | 项目代码 | libpag 主要参考 | 验证方式 |
+|---|---|---|---|
+| PAG | `src/export/pag/` | `libpag/exporter/`（AE 导出插件）、`libpag/src/codec/`、`libpag/src/base/`、`libpag/src/rendering/filters/` | `npm test`、PAG 编码测试、`PAGFile::Load()`、PAG SDK 渲染 |
+| PAGX | `src/export/` 下的 PAGX 文件 | `libpag/src/pagx/`、`libpag/spec/` | `build_libpag/pagx verify` |
 
 ## 开发
 
@@ -19,6 +32,7 @@ Figma 中重新加载插件后，选中 1 个 root 节点导出。
 src/
   code.ts              # 插件入口
   export/
+    pag/                # Figma → 二进制 PAG；与 PAGX 完全独立
     index.ts           # exportPagx() 入口
     figma-to-pagx.ts   # Figma 节点 → PagxLayer 主映射
     figma-reader.ts    # 读取 fills/strokes/effects/坐标/transform
@@ -31,7 +45,7 @@ libpag/                # 可选，本地 clone 的 libpag（gitignore）
 build_libpag/          # pagx CLI 编译输出（gitignore）
 ```
 
-## 导出管线要点
+## PAGX 导出管线要点
 
 | 模块 | 作用 |
 |------|------|
@@ -57,9 +71,9 @@ build_libpag/          # pagx CLI 编译输出（gitignore）
 - PAGX 规范：`libpag/spec/pagx_spec.zh_CN.md`
 - 示例：`libpag/spec/samples/`
 
-## 验证导出
+## PAGX 验证
 
-使用 `pagx` CLI 校验与渲染：
+以下命令仅适用于 `.pagx`。使用 `pagx` CLI 校验与渲染：
 
 ```bash
 build_libpag/pagx verify path/to/export.pagx   # 校验 + 生成 .layout.xml
@@ -84,18 +98,30 @@ cmake --build build_libpag --target pagx-cli -j$(sysctl -n hw.ncpu)
 build_libpag/pagx
 ```
 
+## PAG 验证
+
+- 先运行 `npm test`，覆盖项目内 PAG 编码与导出测试。
+- 需要验证二进制兼容性时，使用 libpag 的 `PAGFile::Load()` 加载生成的 `.pag`。
+- 需要验证视觉结果时，使用 PAG SDK 或 PAGViewer 渲染 `.pag`。
+- 不得使用 `build_libpag/pagx` 处理 `.pag`。
+
 ## libpag 源码探索
 
-`libpag/` 体量大（C++、PAGX 导入/导出、CLI、测试），**优先用 CodeGraph MCP，不要用 `rg`/grep 扫源码**。
+`libpag/` 体量大，**优先用 CodeGraph MCP，不要用 `rg`/grep 扫源码**。查询前必须先按格式选择目录，禁止因仓库名或相似符号跨到另一套格式。
 
 | 场景 | 工具 |
 |---|---|
+| 查 AE 属性如何映射、PAG 如何从 AE 导出 | `libpag/exporter/`，使用 `codegraph_explore` |
+| 查 PAG 二进制 Tag、属性编码、解码流程 | `libpag/src/codec/`、`libpag/src/base/`，使用 `codegraph_explore` |
+| 查 PAG 效果与渲染行为 | `libpag/src/rendering/filters/`，使用 `codegraph_explore` |
 | 查 PAGX 规范实现、符号定义、调用链、数据流 | `codegraph_explore`（首选）或对应 `codegraph_*` |
 | 理解 `SVGImporter`、`pagx verify`、某测试用例在测什么 | `codegraph_context` → `codegraph_explore` |
 | 查错误信息、注释、字符串常量等字面量 | grep/read（CodeGraph 不擅长） |
 | CodeGraph 未初始化或索引过期 | 先问用户是否 `codegraph init -i`；过期文件再 Read |
 
-常见入口：`libpag/spec/`（规范与样例）、`libpag/src/pagx/`（PAGX 运行时）、`libpag/test/src/PAGX*.cpp`（测试）。
+PAG 常见入口：`libpag/exporter/`（AE 导出插件）、`libpag/src/codec/`、`libpag/src/base/`、`libpag/src/rendering/filters/`、PAG 相关测试。
+
+PAGX 常见入口：`libpag/spec/`（规范与样例）、`libpag/src/pagx/`（PAGX 运行时）、`libpag/test/src/PAGX*.cpp`（测试）。
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph
