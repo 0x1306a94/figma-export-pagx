@@ -9,7 +9,7 @@ import {
   readAutoLayoutAttrs,
   readFlexGrow,
   strokesToElements,
-} from '../src/export/figma-reader';
+} from '../src/export/shared/figma-reader';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -312,7 +312,7 @@ assert(
   'fill geometry should take priority over stroke geometry',
 );
 
-const blurDiagnostics: import('../src/export/types').Diagnostic[] = [];
+const blurDiagnostics: import('../src/export/shared/types').Diagnostic[] = [];
 const blurElements = effectsToElements(
   [{
     type: 'LAYER_BLUR',

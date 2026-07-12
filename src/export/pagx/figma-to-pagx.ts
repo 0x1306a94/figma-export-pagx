@@ -6,7 +6,7 @@ import type {
   PagxLayer,
 } from './types';
 import { mapBlendMode } from './blend-mode';
-import { roundDimension } from './color';
+import { roundDimension } from '../shared/color';
 import { figmaIdToPagxId, ensureUniqueId } from './id';
 import {
   addDiagnostic,
@@ -22,8 +22,8 @@ import {
   nodeMatrixInParent,
   parentUsesAutoLayout,
   strokesToElements,
-} from './figma-reader';
-import { shapeElementFromPathData } from './path-detect';
+} from '../shared/figma-reader';
+import { shapeElementFromPathData } from '../shared/path';
 import {
   collectMotionAnimations,
   MOTION_FRAME_RATE,
@@ -31,8 +31,8 @@ import {
   motionLayoutSizeForExport,
   motionPivotForExport,
   needsMotionTransformGroup,
-} from './figma-motion';
-import { exportLayerName } from './solid-marker';
+} from '../shared/figma-motion';
+import { exportLayerName } from '../shared/solid-marker';
 
 function omitLayoutSize(
   attrs: Record<string, string | number | boolean>,

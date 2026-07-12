@@ -25,7 +25,7 @@ const nodeW = 400;
 const nodeH = 889;
 const frameW = 400;
 const frameH = 600;
-const diagnostics: import('../src/export/types').Diagnostic[] = [];
+const diagnostics: import('../src/export/shared/types').Diagnostic[] = [];
 const scale = scaleFromImagePaint(
   { type: 'IMAGE', scaleMode: 'FILL', imageHash: 'frame10' },
   nodeW,

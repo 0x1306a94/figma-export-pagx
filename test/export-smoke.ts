@@ -1,7 +1,7 @@
-import { writePagxXml } from '../src/export/pagx-writer';
-import { createExportContext, mapFigmaToPagx } from '../src/export/figma-to-pagx';
-import { rgbaToHex } from '../src/export/color';
-import type { PagxDocument } from '../src/export/types';
+import { writePagxXml } from '../src/export/pagx/writer';
+import { createExportContext, mapFigmaToPagx } from '../src/export/pagx/figma-to-pagx';
+import { rgbaToHex } from '../src/export/shared/color';
+import type { PagxDocument } from '../src/export/pagx/types';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {

@@ -1,16 +1,10 @@
-import type { ColorSource, ColorStop, Diagnostic, PagxElement } from './types';
+import type { ColorSource, ColorStop, PagxElement } from '../pagx/types';
+import type { Diagnostic } from './types';
 import { rgbaToHex, roundDimension } from './color';
-import { mapBlendMode } from './blend-mode';
+import { mapBlendMode } from '../pagx/blend-mode';
+import { addDiagnostic } from './diagnostic';
 
-export function addDiagnostic(
-  diagnostics: Diagnostic[],
-  level: Diagnostic['level'],
-  code: string,
-  message: string,
-  nodeId?: string,
-): void {
-  diagnostics.push({ level, code, message, nodeId });
-}
+export { addDiagnostic } from './diagnostic';
 
 function paintOpacity(paint: SolidPaint | GradientPaint | ImagePaint): number {
   return paint.opacity ?? 1;

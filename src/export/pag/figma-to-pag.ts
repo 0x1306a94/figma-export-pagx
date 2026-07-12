@@ -1,7 +1,7 @@
 /** Figma SceneNode → PagFile IR (shared reader/motion, PAG-specific mapping). */
 
-import type { Diagnostic } from '../types';
-import { roundDimension } from '../color';
+import type { Diagnostic } from '../shared/types';
+import { roundDimension } from '../shared/color';
 import {
   addDiagnostic,
   geometryPathData,
@@ -10,7 +10,7 @@ import {
   isGeometryNode,
   nodePositionInParent,
   readCornerRadius,
-} from '../figma-reader';
+} from '../shared/figma-reader';
 import {
   MOTION_FRAME_RATE,
   collectPagMotionFrames,
@@ -19,9 +19,9 @@ import {
   motionLayoutSizeForExport,
   motionPivotForExport,
   type PagMotionResult,
-} from '../figma-motion';
-import { canonicalizePathData, svgPathToPagPathData } from '../path-detect';
-import { exportLayerName, parseSolidMarker } from '../solid-marker';
+} from '../shared/figma-motion';
+import { canonicalizePathData, svgPathToPagPathData } from '../shared/path';
+import { exportLayerName, parseSolidMarker } from '../shared/solid-marker';
 import { encodePagFile } from './encode/encode-file';
 import { makeEllipse, makeRectangle, makeSolidFill, makeSolidStroke } from './encode/encode-shapes';
 import { ensureImageBytes, scaleFromImagePaint } from './image-bytes';

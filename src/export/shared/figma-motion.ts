@@ -1,10 +1,10 @@
 import type {
-  Diagnostic,
   PagxAnimation,
   PagxAnimationObject,
   PagxChannel,
   PagxKeyframe,
-} from './types';
+} from '../pagx/types';
+import type { Diagnostic } from './types';
 import { roundDimension } from './color';
 import { addDiagnostic, layoutPositionAttrs, nodeBoundsInParent, nodePositionInParent, pagxMotionMatrixStringFromComponents } from './figma-reader';
 

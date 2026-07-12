@@ -1,4 +1,4 @@
-import { canonicalizePathData, parseSvgPath } from '../src/export/path-detect';
+import { canonicalizePathData, parseSvgPath } from '../src/export/shared/path';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { shapeElementFromPathData } from '../src/export/path-detect';
+import { shapeElementFromPathData } from '../src/export/shared/path';
 
 function attrsToString(attrs: Record<string, string | number | boolean | undefined>): string {
   return Object.entries(attrs)

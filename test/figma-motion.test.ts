@@ -18,8 +18,8 @@ import {
   sampleFloatAtEasedForTest,
   shouldBakeMatrixPerFrameForTest,
   springProgressForTest,
-} from '../src/export/figma-motion';
-import { pagxMotionMatrixStringFromComponents } from '../src/export/figma-reader';
+} from '../src/export/shared/figma-motion';
+import { pagxMotionMatrixStringFromComponents } from '../src/export/shared/figma-reader';
 
 const LINEAR_EASING = { type: 'LINEAR' as const };
 const EASE_OUT = { type: 'EASE_OUT' as const };

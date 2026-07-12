@@ -1,7 +1,7 @@
 /** ImageBytes helpers aligned with AE footage model (hash dedupe + scaleMode → Transform). */
 
-import type { Diagnostic } from '../types';
-import { addDiagnostic } from '../figma-reader';
+import type { Diagnostic } from '../shared/types';
+import { addDiagnostic } from '../shared/diagnostic';
 import type { PagImageBytes, PagPoint } from './types';
 
 export type ImageBytesContext = {

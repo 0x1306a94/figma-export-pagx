@@ -1,8 +1,8 @@
 /** Figma TextNode → PagTextDocument（对齐 AE TextDocument + PAG 官方点/框规则） */
 
-import { roundDimension } from '../color';
-import { addDiagnostic } from '../figma-reader';
-import type { Diagnostic } from '../types';
+import { roundDimension } from '../shared/color';
+import { addDiagnostic } from '../shared/diagnostic';
+import type { Diagnostic } from '../shared/types';
 import {
   ColorBlack,
   ParagraphJustification,

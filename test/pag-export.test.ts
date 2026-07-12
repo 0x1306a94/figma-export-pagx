@@ -14,8 +14,8 @@ import { encodePagFile } from '../src/export/pag/encode/encode-file';
 import { TagCode } from '../src/export/pag/encode/tag-code';
 import { writeEffects } from '../src/export/pag/encode/encode-effects';
 import { writeLayerStyles } from '../src/export/pag/encode/encode-layer-styles';
-import { collectPagMotionFrames } from '../src/export/figma-motion';
-import { exportLayerName, parseSolidMarker } from '../src/export/solid-marker';
+import { collectPagMotionFrames } from '../src/export/shared/figma-motion';
+import { exportLayerName, parseSolidMarker } from '../src/export/shared/solid-marker';
 import {
   keyframesFromValues,
   mapFigmaBlendMode,
@@ -26,7 +26,7 @@ import {
 } from '../src/export/pag/figma-to-pag';
 import { readEncodedImageSize, scaleFromImagePaint } from '../src/export/pag/image-bytes';
 import { KeyframeInterpolationType, PathVerb } from '../src/export/pag/types';
-import type { Diagnostic } from '../src/export/types';
+import type { Diagnostic } from '../src/export/shared/types';
 
 function makePngHeader(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(24);

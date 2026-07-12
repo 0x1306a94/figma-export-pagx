@@ -1,11 +1,6 @@
-export type DiagnosticLevel = 'info' | 'warning' | 'error';
+import type { Diagnostic } from '../shared/types';
 
-export type Diagnostic = {
-  level: DiagnosticLevel;
-  code: string;
-  message: string;
-  nodeId?: string;
-};
+export type { Diagnostic, ExportOptions } from '../shared/types';
 
 export type PagxAttrValue = string | number | boolean;
 
@@ -112,11 +107,6 @@ export type PagxDocument = {
   animations: PagxAnimation[];
   layers: PagxLayer[];
   customData: Record<string, string>;
-};
-
-export type ExportOptions = {
-  frameRate?: number;
-  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };
 
 export type ExportResult = {

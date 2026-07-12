@@ -1,7 +1,7 @@
 figma.showUI(__html__, { width: 360, height: 600 });
 
 import { exportPagx, exportPag } from './export';
-import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
+import { collectMotionDebugData, refreshMotionPivotCache } from './export/shared/figma-motion';
 
 type PluginMessage =
   | { type: 'export-pagx'; frameRate?: number; useWebp?: boolean; webpQuality?: number }

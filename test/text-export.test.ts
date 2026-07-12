@@ -1,6 +1,6 @@
-import { writePagxXml } from '../src/export/pagx-writer';
-import { textLayerAttrs, textNeedsTextBox, textUsesLayerTransform } from '../src/export/figma-to-pagx';
-import type { PagxDocument } from '../src/export/types';
+import { writePagxXml } from '../src/export/pagx/writer';
+import { textLayerAttrs, textNeedsTextBox, textUsesLayerTransform } from '../src/export/pagx/figma-to-pagx';
+import type { PagxDocument } from '../src/export/pagx/types';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
