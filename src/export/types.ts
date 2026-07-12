@@ -116,6 +116,7 @@ export type PagxDocument = {
 
 export type ExportOptions = {
   frameRate?: number;
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };
 
 export type ExportResult = {
@@ -134,4 +135,5 @@ export type ExportContext = {
   layerIdByFigmaId: Map<string, string>;
   motionTargetIdByFigmaId: Map<string, string>;
   frameRate: number;
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };

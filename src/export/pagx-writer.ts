@@ -133,7 +133,7 @@ function writeElement(element: PagxElement, indent: string): string {
     }
     case 'fill': {
       if (element.colorSource) {
-        return `${indent}<Fill>\n${writeColorSource(element.colorSource, `${indent}  `)}${indent}</Fill>\n`;
+        return `${indent}<Fill${writeAttrs(element.attrs)}>\n${writeColorSource(element.colorSource, `${indent}  `)}${indent}</Fill>\n`;
       }
       return `${indent}<Fill${writeAttrs(element.attrs)}/>\n`;
     }

@@ -114,28 +114,37 @@
       margin: 0;
     }
     .settings-card {
-      padding: 10px 12px;
+      overflow: hidden;
       margin-bottom: 12px;
-      background: #f5f5f5;
-      border-radius: 6px;
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
     }
-    .frame-rate-row {
+    .settings-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
+      min-height: 44px;
+      padding: 9px 12px;
     }
-    .frame-rate-row span {
+    .settings-row + .settings-row {
+      border-top: 1px solid #eee;
+    }
+    .settings-label {
       font-size: 12px;
       color: #333;
     }
     .frame-rate-row select {
-      padding: 4px 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      min-width: 64px;
+      padding: 5px 24px 5px 9px;
+      border: 1px solid #d8d8d8;
+      border-radius: 6px;
       font-size: 12px;
       background: #fff;
       color: #111;
+      box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
     }
     .frame-rate-row select:disabled {
       opacity: 0.6;
@@ -151,13 +160,11 @@
       color: #666;
     }
     .quality-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      background: #f5f5f5;
-      border-radius: 6px;
+      padding-left: 28px;
+      transition: opacity 0.15s ease;
+    }
+    .quality-row.disabled {
+      opacity: 0.42;
     }
     .quality-row span:first-child {
       flex: none;
@@ -168,10 +175,56 @@
       accent-color: #111;
     }
     #webp-quality-value {
-      width: 32px;
-      text-align: right;
-      color: #555;
+      width: 38px;
+      padding: 2px 4px;
+      text-align: center;
+      color: #444;
+      background: #f3f3f3;
+      border-radius: 4px;
       font-variant-numeric: tabular-nums;
+    }
+    .switch {
+      position: relative;
+      width: 30px;
+      height: 18px;
+      flex: none;
+    }
+    .switch input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .switch-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #c7c7c7;
+      transition: background 0.15s ease;
+    }
+    .switch-track::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+      transition: transform 0.15s ease;
+    }
+    .switch input:checked + .switch-track {
+      background: #18a0fb;
+    }
+    .switch input:checked + .switch-track::after {
+      transform: translateX(12px);
+    }
+    .switch input:focus-visible + .switch-track {
+      outline: 2px solid rgba(24, 160, 251, 0.3);
+      outline-offset: 2px;
+    }
+    .switch input:disabled + .switch-track {
+      opacity: 0.55;
     }
     #motion-body {
       display: none;
@@ -214,13 +267,25 @@
   <div class="section">
     <div class="section-label">导出</div>
     <div class="settings-card">
-      <label class="frame-rate-row">
-        <span>帧率</span>
+      <label class="settings-row frame-rate-row">
+        <span class="settings-label">帧率</span>
         <select id="frame-rate">
           <option value="24">24</option>
           <option value="30" selected>30</option>
           <option value="60">60</option>
         </select>
+      </label>
+      <label class="settings-row">
+        <span class="settings-label">使用 WebP</span>
+        <span class="switch">
+          <input id="use-webp" type="checkbox" checked />
+          <span class="switch-track"></span>
+        </span>
+      </label>
+      <label id="webp-quality-row" class="settings-row quality-row">
+        <span class="settings-label">质量</span>
+        <input id="webp-quality" type="range" min="0" max="100" step="5" value="80" />
+        <span id="webp-quality-value">80%</span>
       </label>
     </div>
     <div class="export-group">
@@ -229,11 +294,6 @@
     </div>
     <div class="export-group">
       <div class="export-group-title">PAG</div>
-      <label class="quality-row">
-        <span>WebP 质量</span>
-        <input id="webp-quality" type="range" min="0" max="100" step="5" value="80" />
-        <span id="webp-quality-value">80%</span>
-      </label>
       <button id="export-pag">导出 PAG</button>
     </div>
     <div id="meta"></div>
@@ -257,6 +317,8 @@
     const exportButton = document.getElementById('export');
     const exportPagButton = document.getElementById('export-pag');
     const frameRateSelect = document.getElementById('frame-rate');
+    const useWebpInput = document.getElementById('use-webp');
+    const webpQualityRow = document.getElementById('webp-quality-row');
     const webpQualityInput = document.getElementById('webp-quality');
     const webpQualityValue = document.getElementById('webp-quality-value');
     const refreshMotionAnchorButton = document.getElementById('refresh-motion-anchor');
@@ -282,6 +344,14 @@
     webpQualityInput.oninput = () => {
       webpQualityValue.textContent = `${webpQualityInput.value}%`;
     };
+
+    function updateWebpControls() {
+      webpQualityInput.disabled = !useWebpInput.checked;
+      webpQualityRow.classList.toggle('disabled', !useWebpInput.checked);
+    }
+
+    useWebpInput.onchange = updateWebpControls;
+    updateWebpControls();
 
     async function encodeWebp(bytes, quality) {
       const sourceBlob = new Blob([new Uint8Array(bytes)]);
@@ -342,7 +412,9 @@
       exportButton.disabled = busy;
       exportPagButton.disabled = busy;
       frameRateSelect.disabled = busy;
-      webpQualityInput.disabled = busy;
+      useWebpInput.disabled = busy;
+      webpQualityInput.disabled = busy || !useWebpInput.checked;
+      webpQualityRow.classList.toggle('disabled', !useWebpInput.checked);
       exportButton.textContent = busy ? '导出中...' : '导出 PAGX';
       exportPagButton.textContent = busy ? '导出中...' : '导出 PAG';
     }
@@ -403,7 +475,14 @@
     exportButton.onclick = () => {
       clearError();
       setExportBusy(true);
-      parent.postMessage({ pluginMessage: { type: 'export-pagx', frameRate: currentFrameRate() } }, '*');
+      parent.postMessage({
+        pluginMessage: {
+          type: 'export-pagx',
+          frameRate: currentFrameRate(),
+          useWebp: useWebpInput.checked,
+          webpQuality: currentWebpQuality(),
+        },
+      }, '*');
     };
 
     exportPagButton.onclick = () => {
@@ -413,6 +492,7 @@
         pluginMessage: {
           type: 'export-pag',
           frameRate: currentFrameRate(),
+          useWebp: useWebpInput.checked,
           webpQuality: currentWebpQuality(),
         },
       }, '*');

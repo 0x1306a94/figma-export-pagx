@@ -108,6 +108,33 @@ const gradientXml = writePagxXml(gradientDocument);
 assert(gradientXml.includes('<LinearGradient'), 'linear gradient missing');
 assert(gradientXml.includes('<DropShadowStyle'), 'drop shadow missing');
 
+const imageFillXml = writePagxXml({
+  width: 10,
+  height: 10,
+  resources: [{ kind: 'image', id: 'image', source: 'data:image/png;base64,AA==' }],
+  animations: [],
+  customData: {},
+  layers: [{
+    id: 'image-layer',
+    name: 'Image',
+    attrs: {},
+    customData: {},
+    contents: [
+      { kind: 'rectangle', attrs: { width: 10, height: 10 } },
+      {
+        kind: 'fill',
+        attrs: { blendMode: 'multiply' },
+        colorSource: { kind: 'imagePattern', imageRef: '@image', scaleMode: 'stretch' },
+      },
+    ],
+    children: [],
+  }],
+});
+assert(
+  imageFillXml.indexOf('<Rectangle') < imageFillXml.indexOf('<Fill blendMode="multiply">'),
+  'image fill should follow its geometry and preserve blend mode',
+);
+
 async function testMotionDataIsExported(): Promise<void> {
   (globalThis as unknown as { figma: { mixed: symbol } }).figma = {
     mixed: Symbol('mixed'),

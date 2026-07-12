@@ -1,11 +1,11 @@
-figma.showUI(__html__, { width: 360, height: 570 });
+figma.showUI(__html__, { width: 360, height: 600 });
 
 import { exportPagx, exportPag } from './export';
 import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
 
 type PluginMessage =
-  | { type: 'export-pagx'; frameRate?: number }
-  | { type: 'export-pag'; frameRate?: number; webpQuality?: number }
+  | { type: 'export-pagx'; frameRate?: number; useWebp?: boolean; webpQuality?: number }
+  | { type: 'export-pag'; frameRate?: number; useWebp?: boolean; webpQuality?: number }
   | { type: 'encode-webp-result'; requestId: number; bytes?: number[]; error?: string }
   | { type: 'refresh-motion-anchor' };
 
@@ -117,7 +117,9 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         : 0.8;
       const result = await exportPag(root, {
         frameRate,
-        encodeWebp: (bytes) => encodeWebpInUi(bytes, webpQuality),
+        encodeWebp: msg.useWebp === false
+          ? undefined
+          : (bytes) => encodeWebpInUi(bytes, webpQuality),
       });
       figma.ui.postMessage({
         type: 'export-pag-result',
@@ -131,7 +133,15 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       return;
     }
 
-    const result = await exportPagx(root, { frameRate });
+    const webpQuality = typeof msg.webpQuality === 'number'
+      ? Math.max(0, Math.min(1, msg.webpQuality))
+      : 0.8;
+    const result = await exportPagx(root, {
+      frameRate,
+      encodeWebp: msg.useWebp === false
+        ? undefined
+        : (bytes) => encodeWebpInUi(bytes, webpQuality),
+    });
     figma.ui.postMessage({
       type: 'export-result',
       xml: result.xml,

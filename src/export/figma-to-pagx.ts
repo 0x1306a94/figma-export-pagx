@@ -280,7 +280,7 @@ async function mapTextNode(
     if (fillIndex >= 0 && contents[fillIndex].kind === 'fill') {
       contents[fillIndex] = element;
     } else {
-      contents.unshift(...imageElements);
+      contents.push(...imageElements);
       break;
     }
   }
@@ -492,13 +492,38 @@ async function imageFillElements(
     }
 
     try {
-      const bytes = await node.exportAsync({
-        format: 'PNG',
-        constraint: { type: 'SCALE', value: 2 },
-      });
+      let sourceBytes: Uint8Array | undefined;
+      let mimeType: string | undefined;
+      if (paint.imageHash) {
+        const image = figma.getImageByHash(paint.imageHash);
+        if (image) {
+          sourceBytes = await image.getBytesAsync();
+          mimeType = encodedImageMimeType(sourceBytes);
+        }
+      }
+
+      if (!sourceBytes || !mimeType) {
+        addDiagnostic(
+          ctx.diagnostics,
+          'warning',
+          'IMAGE_ORIGINAL_FALLBACK',
+          '无法读取或识别原始图片格式，已回退为 PNG',
+          node.id,
+        );
+        sourceBytes = await node.exportAsync({
+          format: 'PNG',
+          constraint: { type: 'SCALE', value: 2 },
+        });
+        mimeType = 'image/png';
+      }
+
+      const bytes = ctx.encodeWebp ? await ctx.encodeWebp(sourceBytes) : sourceBytes;
+      if (ctx.encodeWebp) {
+        mimeType = 'image/webp';
+      }
       const base64 = figma.base64Encode(bytes);
       const resourceId = ensureUniqueId(figmaIdToPagxId(node.id, 'img'), ctx.usedIds);
-      const source = `data:image/png;base64,${base64}`;
+      const source = `data:${mimeType};base64,${base64}`;
       ctx.resources.push({ kind: 'image', id: resourceId, source });
 
       const colorSource: ColorSource = {
@@ -506,7 +531,11 @@ async function imageFillElements(
         imageRef: `@${resourceId}`,
         scaleMode: paint.scaleMode === 'FILL' ? 'stretch' : 'letterBox',
       };
-      elements.push({ kind: 'fill', attrs: {}, colorSource });
+      const attrs: Record<string, string> = {};
+      if (paint.blendMode && paint.blendMode !== 'NORMAL') {
+        attrs.blendMode = mapBlendMode(paint.blendMode);
+      }
+      elements.push({ kind: 'fill', attrs, colorSource });
     } catch (error) {
       addDiagnostic(
         ctx.diagnostics,
@@ -519,6 +548,50 @@ async function imageFillElements(
   }
 
   return elements;
+}
+
+function encodedImageMimeType(bytes: Uint8Array): string | undefined {
+  if (
+    bytes.length >= 8
+    && bytes[0] === 0x89
+    && bytes[1] === 0x50
+    && bytes[2] === 0x4E
+    && bytes[3] === 0x47
+    && bytes[4] === 0x0D
+    && bytes[5] === 0x0A
+    && bytes[6] === 0x1A
+    && bytes[7] === 0x0A
+  ) {
+    return 'image/png';
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 12
+    && bytes[0] === 0x52
+    && bytes[1] === 0x49
+    && bytes[2] === 0x46
+    && bytes[3] === 0x46
+    && bytes[8] === 0x57
+    && bytes[9] === 0x45
+    && bytes[10] === 0x42
+    && bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  if (
+    bytes.length >= 6
+    && bytes[0] === 0x47
+    && bytes[1] === 0x49
+    && bytes[2] === 0x46
+    && bytes[3] === 0x38
+    && (bytes[4] === 0x37 || bytes[4] === 0x39)
+    && bytes[5] === 0x61
+  ) {
+    return 'image/gif';
+  }
+  return undefined;
 }
 
 async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportContext): Promise<PagxLayer | null> {
@@ -613,7 +686,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
       if (fillIndex >= 0 && contents[fillIndex].kind === 'fill') {
         contents[fillIndex] = element;
       } else {
-        contents.unshift(...imageElements);
+        contents.push(...imageElements);
         break;
       }
     }
@@ -644,7 +717,11 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
   return null;
 }
 
-export function createExportContext(root: SceneNode, frameRate: number = MOTION_FRAME_RATE): ExportContext {
+export function createExportContext(
+  root: SceneNode,
+  frameRate: number = MOTION_FRAME_RATE,
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>,
+): ExportContext {
   const bounds = 'absoluteBoundingBox' in root && root.absoluteBoundingBox
     ? root.absoluteBoundingBox
     : { x: 0, y: 0, width: 'width' in root ? (root as { width: number }).width : 100, height: 'height' in root ? (root as { height: number }).height : 100 };
@@ -659,6 +736,7 @@ export function createExportContext(root: SceneNode, frameRate: number = MOTION_
     layerIdByFigmaId: new Map<string, string>(),
     motionTargetIdByFigmaId: new Map<string, string>(),
     frameRate,
+    encodeWebp,
   };
 }
 

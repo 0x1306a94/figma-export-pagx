@@ -1,5 +1,6 @@
 import type { ColorSource, ColorStop, Diagnostic, PagxElement } from './types';
 import { rgbaToHex, roundDimension } from './color';
+import { mapBlendMode } from './blend-mode';
 
 export function addDiagnostic(
   diagnostics: Diagnostic[],
@@ -13,6 +14,13 @@ export function addDiagnostic(
 
 function paintOpacity(paint: SolidPaint | GradientPaint | ImagePaint): number {
   return paint.opacity ?? 1;
+}
+
+function paintAttrs(paint: Paint): Record<string, string | number | boolean> {
+  if ('blendMode' in paint && paint.blendMode && paint.blendMode !== 'NORMAL') {
+    return { blendMode: mapBlendMode(paint.blendMode) };
+  }
+  return {};
 }
 
 function gradientStops(paint: GradientPaint): ColorStop[] {
@@ -101,12 +109,12 @@ export function fillsToElements(
     if (colorSource.kind === 'solid') {
       elements.push({
         kind: 'fill',
-        attrs: { color: colorSource.color },
+        attrs: { ...paintAttrs(paint), color: colorSource.color },
       });
     } else {
       elements.push({
         kind: 'fill',
-        attrs: {},
+        attrs: paintAttrs(paint),
         colorSource,
       });
     }
@@ -136,6 +144,7 @@ export function strokesToElements(
       continue;
     }
     const attrs: Record<string, string | number | boolean> = {
+      ...paintAttrs(paint),
       width: roundDimension(weight),
     };
     if (node.strokeAlign === 'INSIDE') {

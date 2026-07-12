@@ -10,7 +10,7 @@ export async function exportPagx(
   options?: ExportOptions,
 ): Promise<ExportResult & { xml: string }> {
   const frameRate = options?.frameRate ?? MOTION_FRAME_RATE;
-  const ctx = createExportContext(root, frameRate);
+  const ctx = createExportContext(root, frameRate, options?.encodeWebp);
   const document = await mapFigmaToPagx(root, ctx);
   const xml = writePagxXml(document);
 

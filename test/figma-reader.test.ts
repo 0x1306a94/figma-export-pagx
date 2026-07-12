@@ -1,4 +1,5 @@
 import {
+  fillsToElements,
   geometryPathData,
   layoutPositionAttrs,
   nodeMatrixInParent,
@@ -6,6 +7,7 @@ import {
   pagxMotionMatrixStringFromComponents,
   readAutoLayoutAttrs,
   readFlexGrow,
+  strokesToElements,
 } from '../src/export/figma-reader';
 
 function assert(condition: boolean, message: string): void {
@@ -17,6 +19,25 @@ function assert(condition: boolean, message: string): void {
 function mockNode(overrides: Record<string, unknown>): SceneNode {
   return overrides as unknown as SceneNode;
 }
+
+(globalThis as unknown as { figma: { mixed: symbol } }).figma = {
+  mixed: Symbol('mixed'),
+};
+
+const multiplyFill = fillsToElements(
+  [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 }, blendMode: 'MULTIPLY' } as SolidPaint],
+  'paint-fill',
+  [],
+);
+assert(multiplyFill[0]?.attrs.blendMode === 'multiply', 'fill blend mode should be exported');
+
+const screenStroke = strokesToElements(
+  [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, blendMode: 'SCREEN' } as SolidPaint],
+  { strokeWeight: 2, strokeAlign: 'CENTER' } as GeometryMixin & MinimalStrokesMixin,
+  'paint-stroke',
+  [],
+);
+assert(screenStroke[0]?.attrs.blendMode === 'screen', 'stroke blend mode should be exported');
 
 const autoLayoutParent = mockNode({
   type: 'FRAME',
