@@ -73,6 +73,7 @@ export type PagExportContext = {
   fontKeys: Set<string>;
   durationFrames: number;
   frameRate: number;
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };
 
 export type PagExportResult = {
@@ -84,7 +85,10 @@ export type PagExportResult = {
   height: number;
 };
 
-function createPagExportContext(frameRate: number = MOTION_FRAME_RATE): PagExportContext {
+function createPagExportContext(
+  frameRate: number = MOTION_FRAME_RATE,
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>,
+): PagExportContext {
   return {
     diagnostics: [],
     nodeCount: 0,
@@ -99,6 +103,7 @@ function createPagExportContext(frameRate: number = MOTION_FRAME_RATE): PagExpor
     fontKeys: new Set(),
     durationFrames: 1,
     frameRate,
+    encodeWebp,
   };
 }
 
@@ -1554,10 +1559,10 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
 
 export async function exportPag(
   root: SceneNode,
-  options?: { frameRate?: number },
+  options?: { frameRate?: number; encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array> },
 ): Promise<PagExportResult> {
   const frameRate = options?.frameRate ?? MOTION_FRAME_RATE;
-  const ctx = createPagExportContext(frameRate);
+  const ctx = createPagExportContext(frameRate, options?.encodeWebp);
   const file = await mapFigmaToPag(root, ctx);
   const bytes = encodePagFile(file);
   const main = file.compositions[file.compositions.length - 1];

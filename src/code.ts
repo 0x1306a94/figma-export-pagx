@@ -1,12 +1,33 @@
-figma.showUI(__html__, { width: 360, height: 420 });
+figma.showUI(__html__, { width: 360, height: 570 });
 
 import { exportPagx, exportPag } from './export';
 import { collectMotionDebugData, refreshMotionPivotCache } from './export/figma-motion';
 
 type PluginMessage =
   | { type: 'export-pagx'; frameRate?: number }
-  | { type: 'export-pag'; frameRate?: number }
+  | { type: 'export-pag'; frameRate?: number; webpQuality?: number }
+  | { type: 'encode-webp-result'; requestId: number; bytes?: number[]; error?: string }
   | { type: 'refresh-motion-anchor' };
+
+let nextWebpRequestId = 1;
+const pendingWebpRequests = new Map<number, {
+  resolve: (bytes: Uint8Array) => void;
+  reject: (error: Error) => void;
+}>();
+
+function encodeWebpInUi(bytes: Uint8Array, quality: number): Promise<Uint8Array> {
+  const requestId = nextWebpRequestId;
+  nextWebpRequestId += 1;
+  return new Promise((resolve, reject) => {
+    pendingWebpRequests.set(requestId, { resolve, reject });
+    figma.ui.postMessage({
+      type: 'encode-webp-request',
+      requestId,
+      bytes: Array.from(bytes),
+      quality,
+    });
+  });
+}
 
 function resolveFrameRate(value: unknown): number {
   return value === 24 || value === 30 || value === 60 ? value : 30;
@@ -35,6 +56,18 @@ figma.on('selectionchange', sendSelectionMotionData);
 sendSelectionMotionData();
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
+  if (msg.type === 'encode-webp-result') {
+    const pending = pendingWebpRequests.get(msg.requestId);
+    if (!pending) return;
+    pendingWebpRequests.delete(msg.requestId);
+    if (msg.error || !msg.bytes) {
+      pending.reject(new Error(msg.error || 'WebP 编码失败'));
+    } else {
+      pending.resolve(new Uint8Array(msg.bytes));
+    }
+    return;
+  }
+
   if (msg.type === 'refresh-motion-anchor') {
     const selection = figma.currentPage.selection;
     let refreshed = 0;
@@ -79,7 +112,13 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
   try {
     if (msg.type === 'export-pag') {
-      const result = await exportPag(root, { frameRate });
+      const webpQuality = typeof msg.webpQuality === 'number'
+        ? Math.max(0, Math.min(1, msg.webpQuality))
+        : 0.8;
+      const result = await exportPag(root, {
+        frameRate,
+        encodeWebp: (bytes) => encodeWebpInUi(bytes, webpQuality),
+      });
       figma.ui.postMessage({
         type: 'export-pag-result',
         bytes: Array.from(result.bytes),

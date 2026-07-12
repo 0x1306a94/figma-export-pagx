@@ -9,6 +9,7 @@ export type ImageBytesContext = {
   nextImageId: number;
   images: PagImageBytes[];
   imageIdByHash: Map<string, number>;
+  encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -190,7 +191,7 @@ export function scaleFromImagePaint(
 
 /**
  * Load / dedupe ImageBytes by Figma imageHash (AE footage-id style).
- * Passes through original PNG/JPEG bytes without re-encoding.
+ * Converts original PNG/JPEG bytes to WebP when an encoder is provided.
  */
 export async function ensureImageBytes(
   imageHash: string,
@@ -209,11 +210,11 @@ export async function ensureImageBytes(
   if (!image) {
     throw new Error(`找不到 imageHash=${imageHash}`);
   }
-  const fileBytes = await image.getBytesAsync();
+  const sourceBytes = await image.getBytesAsync();
   let width: number;
   let height: number;
   try {
-    const size = readEncodedImageSize(fileBytes);
+    const size = readEncodedImageSize(sourceBytes);
     width = size.width;
     height = size.height;
   } catch (error) {
@@ -226,6 +227,8 @@ export async function ensureImageBytes(
     );
     throw error;
   }
+
+  const fileBytes = ctx.encodeWebp ? await ctx.encodeWebp(sourceBytes) : sourceBytes;
 
   const id = ctx.nextImageId;
   ctx.nextImageId += 1;
