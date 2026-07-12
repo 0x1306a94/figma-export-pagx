@@ -401,6 +401,34 @@ function solidFromPaint(paint: Paint): { color: { red: number; green: number; bl
   };
 }
 
+export function mapFigmaBlendMode(mode: SolidPaint['blendMode'], nodeName: string): BlendMode {
+  switch (mode) {
+    case 'NORMAL': return BlendMode.Normal;
+    case 'MULTIPLY': return BlendMode.Multiply;
+    case 'SCREEN': return BlendMode.Screen;
+    case 'OVERLAY': return BlendMode.Overlay;
+    case 'DARKEN': return BlendMode.Darken;
+    case 'LIGHTEN': return BlendMode.Lighten;
+    case 'COLOR_DODGE': return BlendMode.ColorDodge;
+    case 'COLOR_BURN': return BlendMode.ColorBurn;
+    case 'HARD_LIGHT': return BlendMode.HardLight;
+    case 'SOFT_LIGHT': return BlendMode.SoftLight;
+    case 'DIFFERENCE': return BlendMode.Difference;
+    case 'EXCLUSION': return BlendMode.Exclusion;
+    case 'HUE': return BlendMode.Hue;
+    case 'SATURATION': return BlendMode.Saturation;
+    case 'COLOR': return BlendMode.Color;
+    case 'LUMINOSITY': return BlendMode.Luminosity;
+    case 'LINEAR_DODGE': return BlendMode.Add;
+    default:
+      throw new Error(`PAG 不支持图层「${nodeName}」的填充混合模式 ${mode}`);
+  }
+}
+
+function blendModeFromPaint(paint: SolidPaint | ImagePaint, node: SceneNode): BlendMode {
+  return mapFigmaBlendMode(paint.blendMode ?? 'NORMAL', node.name);
+}
+
 function svgToPagPath(data: string): PagPathData {
   const parsed = svgPathToPagPathData(data);
   const verbs: PathVerb[] = [];
@@ -586,6 +614,23 @@ function scaleFromSizeFrames(motion: PagMotionResult, baseWidth: number, baseHei
       value: {
         x: baseWidth > 0 ? frame.contentWidth / baseWidth : 1,
         y: baseHeight > 0 ? frame.contentHeight / baseHeight : 1,
+      },
+    })),
+  );
+}
+
+/** Fold Figma WIDTH/HEIGHT animation into PAG Transform2D.scale. */
+export function scaleFromMotionAndSizeFrames(
+  motion: PagMotionResult,
+  baseWidth: number,
+  baseHeight: number,
+): PagTransform2D['scale'] {
+  return keyframesFromValues(
+    motion.frames.map((frame) => ({
+      frame: frame.frame,
+      value: {
+        x: frame.scaleX * (baseWidth > 0 ? frame.contentWidth / baseWidth : 1),
+        y: frame.scaleY * (baseHeight > 0 ? frame.contentHeight / baseHeight : 1),
       },
     })),
   );
@@ -806,12 +851,13 @@ async function mapImageLayer(
   node: SceneNode & MinimalFillsMixin,
   parent: SceneNode | null,
   ctx: PagExportContext,
+  imagePaintOverride?: ImagePaint,
 ): Promise<PagLayer | null> {
   if (!hasImageFill(node.fills) || node.fills === figma.mixed || !Array.isArray(node.fills)) {
     return null;
   }
 
-  const imageFills = node.fills.filter(
+  const imageFills = imagePaintOverride ? [imagePaintOverride] : node.fills.filter(
     (paint): paint is ImagePaint => paint.type === 'IMAGE' && paint.visible !== false,
   );
   if (imageFills.length === 0) {
@@ -857,6 +903,7 @@ async function mapImageLayer(
 
     return {
       ...base,
+      blendMode: blendModeFromPaint(imagePaint, node),
       type: LayerType.Image,
       imageId: image.id,
     };
@@ -976,17 +1023,6 @@ function assertSolidEligible(node: SceneNode, exportName: string): {
     throw new Error(`#solid 图层「${label}」不能有描边`);
   }
 
-  if (isMotionNode(node)) {
-    const widthBinding = node.animations.WIDTH;
-    const heightBinding = node.animations.HEIGHT;
-    const hasSizeKeyframes = [widthBinding, heightBinding].some((binding) =>
-      binding?.tracks?.some((track) => track.keyframes.length >= 2),
-    );
-    if (hasSizeKeyframes) {
-      throw new Error(`#solid 图层「${label}」不支持 WIDTH/HEIGHT size 动画`);
-    }
-  }
-
   return {
     width: geometry.width,
     height: geometry.height,
@@ -1004,9 +1040,6 @@ function mapSolidLayer(
   const eligible = assertSolidEligible(node, exportName);
   ctx.nodeCount += 1;
   const motion = readMotionForNode(node, parent, eligible.width, eligible.height, ctx);
-  if (motion?.sizeAnimated) {
-    throw new Error(`#solid 图层「${exportName || node.name}」不支持 WIDTH/HEIGHT size 动画`);
-  }
 
   const base = layerBase(
     node,
@@ -1017,6 +1050,13 @@ function mapSolidLayer(
     motion,
     exportName,
   );
+  if (motion?.sizeAnimated) {
+    base.transform.scale = scaleFromMotionAndSizeFrames(
+      motion,
+      eligible.width,
+      eligible.height,
+    );
+  }
 
   // Bake fill opacity into layer opacity (Solid color is RGB only).
   if (eligible.fillOpacity < OPAQUE) {
@@ -1045,25 +1085,196 @@ function mapSolidLayer(
   };
 }
 
-async function mapGeometryLayer(
+function canMapFillToSolidLayer(node: SceneNode): boolean {
+  const geometry = solidEligibleGeometry(node);
+  if (!geometry || geometry.width <= 0 || geometry.height <= 0) {
+    return false;
+  }
+  if (node.type === 'RECTANGLE' && readCornerRadius(node, node.id, []) > 0) {
+    return false;
+  }
+  return true;
+}
+
+function mapSolidPaintLayer(
+  node: SceneNode,
+  ctx: PagExportContext,
+  paint: SolidPaint,
+): PagLayer {
+  const size = resolvedSize(node);
+  const solid = solidFromPaint(paint)!;
+  return {
+    id: allocLayerId(ctx),
+    name: exportLayerName(node.name),
+    isActive: true,
+    autoOrientation: false,
+    parentId: null,
+    stretch: { ...DEFAULT_RATIO },
+    startTime: 0,
+    duration: Math.max(1, ctx.durationFrames),
+    blendMode: blendModeFromPaint(paint, node),
+    trackMatteType: 0,
+    transform: defaultTransform2D({
+      anchorPoint: { x: size.width / 2, y: size.height / 2 },
+      position: { x: size.width / 2, y: size.height / 2 },
+      opacity: solid.opacity,
+    }),
+    masks: [],
+    effects: [],
+    layerStyles: [],
+    type: LayerType.Solid,
+    solidColor: solid.color,
+    width: size.width,
+    height: size.height,
+  };
+}
+
+async function mapImagePaintLayer(
+  node: SceneNode,
+  ctx: PagExportContext,
+  paint: ImagePaint,
+): Promise<PagLayer> {
+  if (!paint.imageHash) {
+    throw new Error(`图层「${node.name}」的 IMAGE fill 缺少 imageHash`);
+  }
+  const image = await ensureImageBytes(paint.imageHash, ctx, node.id);
+  const size = resolvedSize(node);
+  const contentScale = scaleFromImagePaint(
+    paint,
+    size.width,
+    size.height,
+    image.width,
+    image.height,
+    ctx.diagnostics,
+    node.id,
+  );
+  return {
+    id: allocLayerId(ctx),
+    name: exportLayerName(node.name),
+    isActive: true,
+    autoOrientation: false,
+    parentId: null,
+    stretch: { ...DEFAULT_RATIO },
+    startTime: 0,
+    duration: Math.max(1, ctx.durationFrames),
+    blendMode: blendModeFromPaint(paint, node),
+    trackMatteType: 0,
+    transform: defaultTransform2D({
+      anchorPoint: { x: image.width / 2, y: image.height / 2 },
+      position: { x: size.width / 2, y: size.height / 2 },
+      scale: contentScale,
+      opacity: opacityToPag(paint.opacity ?? 1),
+    }),
+    masks: [],
+    effects: [],
+    layerStyles: [],
+    type: LayerType.Image,
+    imageId: image.id,
+  };
+}
+
+function mapShapePaintLayer(
+  node: SceneNode,
+  ctx: PagExportContext,
+  paint: SolidPaint,
+): PagLayer {
+  const size = resolvedSize(node);
+  const solid = solidFromPaint(paint)!;
+  return {
+    id: allocLayerId(ctx),
+    name: exportLayerName(node.name),
+    isActive: true,
+    autoOrientation: false,
+    parentId: null,
+    stretch: { ...DEFAULT_RATIO },
+    startTime: 0,
+    duration: Math.max(1, ctx.durationFrames),
+    blendMode: blendModeFromPaint(paint, node),
+    trackMatteType: 0,
+    transform: defaultTransform2D({
+      anchorPoint: { x: size.width / 2, y: size.height / 2 },
+      position: { x: size.width / 2, y: size.height / 2 },
+    }),
+    masks: [],
+    effects: [],
+    layerStyles: [],
+    type: LayerType.Shape,
+    contents: [
+      ...shapeContentsFromNode(node, ctx).filter(
+        (element) => element.kind !== 'fill' && element.kind !== 'stroke',
+      ),
+      makeSolidFill(solid.color, solid.opacity),
+    ],
+  };
+}
+
+async function mapGeometryLayers(
   node: SceneNode,
   parent: SceneNode | null,
   ctx: PagExportContext,
-): Promise<PagLayer | null> {
+): Promise<PagLayer[]> {
   const solidMarker = parseSolidMarker(node.name);
   if (solidMarker.isSolid) {
-    return mapSolidLayer(node, parent, ctx, solidMarker.exportName);
+    return [mapSolidLayer(node, parent, ctx, solidMarker.exportName)];
   }
 
-  if (hasImageFill('fills' in node ? node.fills : [])) {
+  const fills = 'fills' in node && Array.isArray(node.fills)
+    ? node.fills.filter((paint) => paint.visible !== false)
+    : [];
+  const supportedFills = fills.filter(
+    (paint): paint is SolidPaint | ImagePaint => paint.type === 'SOLID' || paint.type === 'IMAGE',
+  );
+  if (supportedFills.length > 1) {
+    const size = resolvedSize(node);
+    const motion = readMotionForNode(node, parent, size.width, size.height, ctx);
+    const layers: PagLayer[] = [];
+    for (const paint of supportedFills) {
+      if (paint.type === 'IMAGE') {
+        layers.push(await mapImagePaintLayer(node, ctx, paint));
+        continue;
+      }
+
+      ctx.nodeCount += 1;
+      if (canMapFillToSolidLayer(node)) {
+        layers.push(mapSolidPaintLayer(node, ctx, paint));
+        continue;
+      }
+      layers.push(mapShapePaintLayer(node, ctx, paint));
+    }
+
+    // PAG stores top-most layers first. Figma fills are bottom-to-top.
+    layers.reverse();
+    const compositionId = allocCompositionId(ctx);
+    ctx.compositions.push({
+      id: compositionId,
+      width: Math.max(1, Math.round(size.width)),
+      height: Math.max(1, Math.round(size.height)),
+      duration: Math.max(1, ctx.durationFrames),
+      frameRate: ctx.frameRate,
+      backgroundColor: ColorWhite,
+      layers,
+    });
+
+    ctx.nodeCount += 1;
+    const base = layerBase(node, parent, size.width, size.height, ctx, motion);
+    if (motion?.sizeAnimated) {
+      base.transform.scale = scaleFromMotionAndSizeFrames(motion, size.width, size.height);
+    }
+    return [{
+      ...base,
+      type: LayerType.PreCompose,
+      compositionId,
+      compositionStartTime: 0,
+    }];
+  }
+
+  if (supportedFills.some((paint) => paint.type === 'IMAGE')) {
     const imageLayer = await mapImageLayer(
       node as SceneNode & MinimalFillsMixin,
       parent,
       ctx,
     );
-    if (imageLayer) {
-      return imageLayer;
-    }
+    return imageLayer ? [imageLayer] : [];
   }
 
   ctx.nodeCount += 1;
@@ -1073,7 +1284,7 @@ async function mapGeometryLayer(
   let contents = shapeContentsFromNode(node, ctx);
   if (contents.length === 0) {
     addDiagnostic(ctx.diagnostics, 'warning', 'EMPTY_SHAPE', '形状层无内容，已跳过', node.id);
-    return null;
+    return [];
   }
 
   if (motion?.sizeAnimated) {
@@ -1088,11 +1299,11 @@ async function mapGeometryLayer(
     }
   }
 
-  return {
+  return [{
     ...base,
     type: LayerType.Shape,
     contents,
-  };
+  }];
 }
 
 async function mapContainerAsComposition(
@@ -1105,11 +1316,14 @@ async function mapContainerAsComposition(
 
   // Own fill/stroke as a shape layer at origin
   const selfContents = shapeContentsFromNode(node, ctx);
-  if (selfContents.length > 0) {
+  const hasSelfPaint = selfContents.some(
+    (element) => element.kind === 'fill' || element.kind === 'stroke',
+  );
+  if (hasSelfPaint) {
     ctx.nodeCount += 1;
     layers.push({
       id: allocLayerId(ctx),
-      name: `${node.name} Background`,
+      name: exportLayerName(node.name),
       isActive: true,
       autoOrientation: false,
       parentId: null,
@@ -1163,14 +1377,16 @@ async function mapContainerAsComposition(
       continue;
     }
 
-    const mapped = await mapNodeToLayer(child, node, ctx);
-    if (!mapped) {
+    const mappedLayers = await mapNodeToLayers(child, node, ctx);
+    if (mappedLayers.length === 0) {
       continue;
     }
     if (pendingMask) {
-      mapped.masks = [...mapped.masks, pendingMask];
+      for (const mapped of mappedLayers) {
+        mapped.masks = [...mapped.masks, pendingMask];
+      }
     }
-    layers.push(mapped);
+    layers.push(...mappedLayers);
   }
 
   // PAG draws first layer at bottom; Figma children[0] is top → reverse
@@ -1189,33 +1405,33 @@ async function mapContainerAsComposition(
   return { compositionId, width: size.width, height: size.height };
 }
 
-async function mapNodeToLayer(
+async function mapNodeToLayers(
   node: SceneNode,
   parent: SceneNode | null,
   ctx: PagExportContext,
-): Promise<PagLayer | null> {
+): Promise<PagLayer[]> {
   if (node.type === 'SLICE') {
-    return null;
+    return [];
   }
 
   if (isContainerNode(node)) {
     const nested = await mapContainerAsComposition(node, ctx);
     ctx.nodeCount += 1;
     const base = layerBase(node, parent, nested.width, nested.height, ctx);
-    return {
+    return [{
       ...base,
       type: LayerType.PreCompose,
       compositionId: nested.compositionId,
       compositionStartTime: 0,
-    };
+    }];
   }
 
   if (node.type === 'TEXT') {
-    return mapTextLayer(node, parent, ctx);
+    return [mapTextLayer(node, parent, ctx)];
   }
 
   if (isGeometryNode(node)) {
-    return mapGeometryLayer(node, parent, ctx);
+    return mapGeometryLayers(node, parent, ctx);
   }
 
   addDiagnostic(
@@ -1225,7 +1441,7 @@ async function mapNodeToLayer(
     `跳过不支持的节点类型 ${node.type}`,
     node.id,
   );
-  return null;
+  return [];
 }
 
 function finalizeDurations(ctx: PagExportContext): void {
@@ -1291,8 +1507,8 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
       layers,
     });
   } else if (isGeometryNode(root)) {
-    const layer = await mapNodeToLayer(root, null, ctx);
-    if (layer) {
+    const rootLayers = await mapNodeToLayers(root, null, ctx);
+    for (const layer of rootLayers) {
       // Root layer at origin
       if (layer.transform.position.animatable === false) {
         const pivot = motionPivotForExport(root, width, height);
@@ -1301,6 +1517,7 @@ export async function mapFigmaToPag(root: SceneNode, ctx: PagExportContext): Pro
       }
       layers.push(layer);
     }
+    layers.reverse();
     ctx.compositions.push({
       id: mainId,
       width: Math.max(1, Math.round(width)),

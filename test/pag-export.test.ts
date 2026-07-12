@@ -18,8 +18,10 @@ import { collectPagMotionFrames } from '../src/export/figma-motion';
 import { exportLayerName, parseSolidMarker } from '../src/export/solid-marker';
 import {
   keyframesFromValues,
+  mapFigmaBlendMode,
   mapNodeEffects,
   opacityToPag,
+  scaleFromMotionAndSizeFrames,
   svgToPagPath,
 } from '../src/export/pag/figma-to-pag';
 import { readEncodedImageSize, scaleFromImagePaint } from '../src/export/pag/image-bytes';
@@ -56,6 +58,17 @@ function testEncodeStreamBasics(): void {
   const data = stream.release();
   assert.ok(data.length > 0);
   assert.equal(data[0], 1);
+}
+
+function testFigmaBlendModeMapping(): void {
+  assert.equal(mapFigmaBlendMode('NORMAL', 'Layer'), BlendMode.Normal);
+  assert.equal(mapFigmaBlendMode('MULTIPLY', 'Layer'), BlendMode.Multiply);
+  assert.equal(mapFigmaBlendMode('COLOR_DODGE', 'Layer'), BlendMode.ColorDodge);
+  assert.equal(mapFigmaBlendMode('LINEAR_DODGE', 'Layer'), BlendMode.Add);
+  assert.throws(
+    () => mapFigmaBlendMode('LINEAR_BURN', 'Unsupported Layer'),
+    /PAG 不支持图层「Unsupported Layer」的填充混合模式 LINEAR_BURN/,
+  );
 }
 
 function testMinimalShapePag(): void {
@@ -385,6 +398,11 @@ function testSizeAnimationUsesShapeSizeNotCenterScale(): void {
   assert.equal(last.contentWidth, 200);
   assert.equal(last.positionX, 20);
 
+  const solidScale = scaleFromMotionAndSizeFrames(motion!, 100, 80);
+  assert.ok(solidScale.animatable);
+  assert.deepEqual(solidScale.keyframes[0].startValue, { x: 1, y: 1 });
+  assert.deepEqual(solidScale.keyframes[solidScale.keyframes.length - 1].endValue, { x: 2, y: 1 });
+
   const sizeProperty = keyframesFromValues(
     motion!.frames.map((frame) => ({
       frame: frame.frame,
@@ -639,6 +657,7 @@ function testImageLayerPagEncode(): void {
 }
 
 testEncodeStreamBasics();
+testFigmaBlendModeMapping();
 testMinimalShapePag();
 testOpacityAndPath();
 testMapNodeEffects();
