@@ -106,6 +106,35 @@ function staticLayerMatrixInParent(node: SceneNode, parent: SceneNode | null): s
   return matrix;
 }
 
+function effectsForNode(node: SceneNode, ctx: ExportContext): PagxElement[] {
+  if (!('effects' in node)) {
+    return [];
+  }
+  const effectTargetIds = new Map<number, string>();
+  for (const [effectIndex, effect] of node.effects.entries()) {
+    const radiusAnimation = 'animations' in node
+      ? node.animations.effects?.[effectIndex]?.RADIUS
+      : undefined;
+    if (effect.type !== 'LAYER_BLUR' || effect.visible === false || !radiusAnimation) {
+      continue;
+    }
+    const targetId = ensureUniqueId(
+      figmaIdToPagxId(`${node.id}_${effectIndex}`, 'blur_filter'),
+      ctx.usedIds,
+    );
+    effectTargetIds.set(effectIndex, targetId);
+    ctx.effectTargetIdByFigmaId.set(`${node.id}:${effectIndex}`, targetId);
+  }
+  return effectsToElements(node.effects, node.id, ctx.diagnostics, effectTargetIds);
+}
+
+function isLayerEffect(element: PagxElement): boolean {
+  return element.kind === 'dropShadowStyle'
+    || element.kind === 'innerShadowStyle'
+    || element.kind === 'backgroundBlurStyle'
+    || element.kind === 'blurFilter';
+}
+
 type PagxMaskType = 'alpha' | 'luminance' | 'contour';
 
 function isMaskNode(node: SceneNode): node is SceneNode & { isMask: boolean; maskType: MaskType } {
@@ -467,7 +496,7 @@ function shapeContents(
   }
 
   if ('effects' in node) {
-    contents.push(...effectsToElements(node.effects, nodeId, ctx.diagnostics));
+    contents.push(...effectsForNode(node, ctx));
   }
 
   return contents;
@@ -633,7 +662,7 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
       contents.push(...strokesToElements(node.strokes, node, node.id, ctx.diagnostics));
     }
     if ('effects' in node) {
-      contents.push(...effectsToElements(node.effects, node.id, ctx.diagnostics));
+      contents.push(...effectsForNode(node, ctx));
     }
     contents.push(...await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx));
 
@@ -692,9 +721,12 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
     }
 
     if (needsMotionTransformGroup(node)) {
+      const layerEffects = contents.filter(isLayerEffect);
+      contents = contents.filter((element) => !isLayerEffect(element));
       const groupId = ensureUniqueId(figmaIdToPagxId(node.id, 'motion_group'), ctx.usedIds);
       ctx.motionTargetIdByFigmaId.set(node.id, groupId);
       contents = wrapContentsInMotionGroup(contents, node, groupId);
+      contents.push(...layerEffects);
     }
 
     return {
@@ -735,6 +767,7 @@ export function createExportContext(
     nodeCount: 0,
     layerIdByFigmaId: new Map<string, string>(),
     motionTargetIdByFigmaId: new Map<string, string>(),
+    effectTargetIdByFigmaId: new Map<string, string>(),
     frameRate,
     encodeWebp,
   };
@@ -778,6 +811,7 @@ export async function mapFigmaToPagx(root: SceneNode, ctx: ExportContext): Promi
       ctx.motionTargetIdByFigmaId,
       ctx.diagnostics,
       ctx.frameRate,
+      ctx.effectTargetIdByFigmaId,
     ),
     layers,
     customData: {

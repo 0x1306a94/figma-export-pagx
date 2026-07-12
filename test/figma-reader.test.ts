@@ -1,5 +1,6 @@
 import {
   fillsToElements,
+  effectsToElements,
   geometryPathData,
   layoutPositionAttrs,
   nodeMatrixInParent,
@@ -309,6 +310,28 @@ assert(
     strokeGeometry: [{ data: 'M 0 0 L 100 200', windingRule: 'NONZERO' }],
   }) === 'M 0 0 L 50 50',
   'fill geometry should take priority over stroke geometry',
+);
+
+const blurDiagnostics: import('../src/export/types').Diagnostic[] = [];
+const blurElements = effectsToElements(
+  [{
+    type: 'LAYER_BLUR',
+    visible: true,
+    radius: 21.2,
+    blurType: 'PROGRESSIVE',
+    startRadius: 0,
+    startOffset: { x: 0.5, y: 0 },
+    endOffset: { x: 0.5, y: 1 },
+  } as BlurEffect],
+  '38:13',
+  blurDiagnostics,
+  new Map([[0, 'blur_filter_38_13_0']]),
+);
+assert(blurElements[0]?.attrs.id === 'blur_filter_38_13_0', 'blur filter should export animation target id');
+assert(blurElements[0]?.attrs.blurX === 21.2, 'progressive blur should fall back to uniform blur radius');
+assert(
+  blurDiagnostics.some((diagnostic) => diagnostic.code === 'PROGRESSIVE_BLUR_FALLBACK'),
+  'progressive blur fallback should emit a warning',
 );
 
 console.log('figma-reader tests passed');

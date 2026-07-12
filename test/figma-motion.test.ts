@@ -1109,6 +1109,55 @@ function testMotionDebugDataIncludesPivotSourceAndCachesAnchor(): void {
   assert.equal(store.value, '177,77.5');
 }
 
+function testLayerBlurRadiusAnimation(): void {
+  const node = {
+    id: '38:13',
+    type: 'RECTANGLE',
+    animations: {
+      effects: {
+        0: {
+          RADIUS: {
+            timelineDuration: 2,
+            baseValue: { type: 'FLOAT' as const, value: 21.2 },
+            tracks: [{
+              keyframeOperation: 'SET' as const,
+              keyframes: [
+                { timelinePosition: 0.007398, value: { type: 'FLOAT' as const, value: 21.2 }, easing: LINEAR_EASING },
+                { timelinePosition: 0.612, value: { type: 'FLOAT' as const, value: 60 }, easing: LINEAR_EASING },
+              ],
+            }],
+          },
+        },
+      },
+    },
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+  const root = {
+    id: '38:2',
+    type: 'FRAME',
+    children: [node],
+    animations: {},
+    animationStyles: [],
+    timelines: [{ duration: 2 }],
+  } as unknown as SceneNode;
+
+  const animations = collectMotionAnimations(
+    root,
+    new Map([[node.id, 'layer_38_13']]),
+    new Map(),
+    [],
+    30,
+    new Map([[`${node.id}:0`, 'blur_filter_38_13_0']]),
+  );
+  const blurObject = animations[0].objects.find((item) => item.target === 'blur_filter_38_13_0');
+  assert(blurObject, 'layer blur animation should target BlurFilter');
+  assert.deepEqual(blurObject.channels.map((channel) => channel.name), ['blurX', 'blurY']);
+  assert.deepEqual(blurObject.channels[0].keyframes.map((keyframe) => keyframe.time), [0, 18]);
+  assert.deepEqual(blurObject.channels[0].keyframes.map((keyframe) => keyframe.value), ['21.2', '60']);
+  assert.deepEqual(blurObject.channels[1].keyframes, blurObject.channels[0].keyframes);
+}
+
 function run(): void {
   testSpringOvershoot();
   testRotationSamplingUsesSpring();
@@ -1149,6 +1198,7 @@ function run(): void {
   testRefreshMotionPivotCacheAllowsSmallTimelineNudge();
   testRefreshMotionPivotCacheHandlesTopLeftRotation();
   testMotionDebugDataIncludesPivotSourceAndCachesAnchor();
+  testLayerBlurRadiusAnimation();
   console.log('figma-motion tests passed');
 }
 

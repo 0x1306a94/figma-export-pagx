@@ -787,6 +787,11 @@ function hasMotionData(node: MotionCapableNode): boolean {
       return true;
     }
   }
+  for (const effectAnimation of Object.values(animations.effects ?? {})) {
+    if (effectAnimation?.RADIUS) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -1490,6 +1495,46 @@ function buildAlphaChannel(
     frameRate,
     motionStyleTimelineOffset(node, 'OPACITY'),
   );
+}
+
+function buildBlurChannels(
+  node: MotionCapableNode,
+  effectTargetIdByFigmaId: Map<string, string>,
+  diagnostics: Diagnostic[],
+  frameRate: number,
+): PagxAnimationObject[] {
+  const objects: PagxAnimationObject[] = [];
+  const effectAnimations = node.animations.effects;
+  if (!effectAnimations) {
+    return objects;
+  }
+  for (const effectIndexText of Object.keys(effectAnimations)) {
+    const effectIndex = Number(effectIndexText);
+    const binding = effectAnimations[effectIndex]?.RADIUS;
+    const targetId = effectTargetIdByFigmaId.get(`${node.id}:${effectIndex}`);
+    if (!binding || !targetId) {
+      continue;
+    }
+    const blurX = buildFloatChannel(
+      binding,
+      node.id,
+      `effects[${effectIndex}].RADIUS`,
+      'blurX',
+      diagnostics,
+      frameRate,
+    );
+    if (!blurX) {
+      continue;
+    }
+    blurX.keyframes = blurX.keyframes.filter((keyframe, index, keyframes) => (
+      index === keyframes.length - 1 || keyframe.time !== keyframes[index + 1].time
+    ));
+    objects.push({
+      target: targetId,
+      channels: [blurX, { ...blurX, name: 'blurY', keyframes: blurX.keyframes.map((keyframe) => ({ ...keyframe })) }],
+    });
+  }
+  return objects;
 }
 
 function readSizeSamples(node: MotionCapableNode, diagnostics: Diagnostic[]): {
@@ -2357,6 +2402,12 @@ function resolveDurationSeconds(root: MotionCapableNode, nodes: MotionCapableNod
         maxDuration = Math.max(maxDuration, binding.timelineDuration);
       }
     }
+    for (const effectAnimation of Object.values(node.animations.effects ?? {})) {
+      const binding = effectAnimation?.RADIUS;
+      if (binding) {
+        maxDuration = Math.max(maxDuration, binding.timelineDuration);
+      }
+    }
   }
 
   for (const node of nodes) {
@@ -2379,6 +2430,9 @@ function resolveDurationSeconds(root: MotionCapableNode, nodes: MotionCapableNod
     }
     for (const field of SIZE_FIELDS) {
       maxDuration = Math.max(maxDuration, collectTimes(getSizeBinding(node.animations, field)));
+    }
+    for (const effectAnimation of Object.values(node.animations.effects ?? {})) {
+      maxDuration = Math.max(maxDuration, collectTimes(effectAnimation?.RADIUS));
     }
   }
 
@@ -2713,6 +2767,7 @@ export function collectMotionAnimations(
   motionTargetIdByFigmaId: Map<string, string>,
   diagnostics: Diagnostic[],
   frameRate: number = MOTION_FRAME_RATE,
+  effectTargetIdByFigmaId: Map<string, string> = new Map(),
 ): PagxAnimation[] {
   if (!isMotionNode(root)) {
     return [];
@@ -2744,6 +2799,7 @@ export function collectMotionAnimations(
     }
 
     const parent = resolveParentForNode(root, node);
+    objects.push(...buildBlurChannels(node, effectTargetIdByFigmaId, diagnostics, frameRate));
     const alpha = buildAlphaChannel(node, diagnostics, frameRate);
     if (alpha) {
       objects.push({ target: targetId, channels: [alpha] });

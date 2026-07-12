@@ -134,6 +134,7 @@ export type ExportContext = {
   nodeCount: number;
   layerIdByFigmaId: Map<string, string>;
   motionTargetIdByFigmaId: Map<string, string>;
+  effectTargetIdByFigmaId: Map<string, string>;
   frameRate: number;
   encodeWebp?: (bytes: Uint8Array) => Promise<Uint8Array>;
 };

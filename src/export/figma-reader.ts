@@ -172,10 +172,11 @@ export function effectsToElements(
   effects: ReadonlyArray<Effect>,
   nodeId: string,
   diagnostics: Diagnostic[],
+  effectTargetIds: Map<number, string> = new Map(),
 ): PagxElement[] {
   const elements: PagxElement[] = [];
 
-  for (const effect of effects) {
+  for (const [effectIndex, effect] of effects.entries()) {
     if (effect.visible === false) {
       continue;
     }
@@ -210,9 +211,19 @@ export function effectsToElements(
     }
 
     if (effect.type === 'LAYER_BLUR') {
+      if ('blurType' in effect && effect.blurType === 'PROGRESSIVE') {
+        addDiagnostic(
+          diagnostics,
+          'warning',
+          'PROGRESSIVE_BLUR_FALLBACK',
+          'PAGX 不支持渐进模糊，已降级为均匀模糊',
+          nodeId,
+        );
+      }
       elements.push({
         kind: 'blurFilter',
         attrs: {
+          ...(effectTargetIds.has(effectIndex) ? { id: effectTargetIds.get(effectIndex)! } : {}),
           blurX: roundDimension(effect.radius),
           blurY: roundDimension(effect.radius),
         },
