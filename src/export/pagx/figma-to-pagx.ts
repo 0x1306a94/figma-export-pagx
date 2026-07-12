@@ -1,5 +1,6 @@
 import type {
   ColorSource,
+  Diagnostic,
   ExportContext,
   PagxDocument,
   PagxElement,
@@ -303,16 +304,7 @@ async function mapTextNode(
 ): Promise<PagxLayer> {
   const contents = shapeContents(node, ctx);
 
-  const imageElements = await imageFillElements(node, ctx);
-  for (const element of imageElements) {
-    const fillIndex = contents.findIndex((item) => item.kind === 'fill');
-    if (fillIndex >= 0 && contents[fillIndex].kind === 'fill') {
-      contents[fillIndex] = element;
-    } else {
-      contents.push(...imageElements);
-      break;
-    }
-  }
+  replaceFillElements(contents, node, await imageFillElements(node, ctx), ctx.diagnostics);
 
   const useTextBox = textNeedsTextBox(node, parent) && !textUsesLayerTransform(node, parent);
   if (useTextBox) {
@@ -502,10 +494,15 @@ function shapeContents(
   return contents;
 }
 
+type IndexedImageFill = {
+  paintIndex: number;
+  element: PagxElement;
+};
+
 async function imageFillElements(
   node: SceneNode & MinimalFillsMixin & ExportMixin,
   ctx: ExportContext,
-): Promise<PagxElement[]> {
+): Promise<IndexedImageFill[]> {
   if (!('fills' in node) || !hasImageFill(node.fills)) {
     return [];
   }
@@ -514,8 +511,8 @@ async function imageFillElements(
     return [];
   }
 
-  const elements: PagxElement[] = [];
-  for (const paint of node.fills) {
+  const elements: IndexedImageFill[] = [];
+  for (const [paintIndex, paint] of node.fills.entries()) {
     if (paint.type !== 'IMAGE' || paint.visible === false) {
       continue;
     }
@@ -560,11 +557,14 @@ async function imageFillElements(
         imageRef: `@${resourceId}`,
         scaleMode: paint.scaleMode === 'FILL' ? 'stretch' : 'letterBox',
       };
-      const attrs: Record<string, string> = {};
+      const attrs: Record<string, string | number> = {};
+      if (paint.opacity !== undefined && paint.opacity !== 1) {
+        attrs.alpha = roundDimension(paint.opacity);
+      }
       if (paint.blendMode && paint.blendMode !== 'NORMAL') {
         attrs.blendMode = mapBlendMode(paint.blendMode);
       }
-      elements.push({ kind: 'fill', attrs, colorSource });
+      elements.push({ paintIndex, element: { kind: 'fill', attrs, colorSource } });
     } catch (error) {
       addDiagnostic(
         ctx.diagnostics,
@@ -577,6 +577,43 @@ async function imageFillElements(
   }
 
   return elements;
+}
+
+function replaceFillElements(
+  contents: PagxElement[],
+  node: SceneNode & MinimalFillsMixin,
+  imageFills: IndexedImageFill[],
+  diagnostics: Diagnostic[],
+): void {
+  if (node.fills === figma.mixed || !Array.isArray(node.fills)) {
+    return;
+  }
+  const imageFillByIndex = new Map(imageFills.map((fill) => [fill.paintIndex, fill.element]));
+  const fills: PagxElement[] = [];
+  for (const [paintIndex, paint] of node.fills.entries()) {
+    if (paint.visible === false) {
+      continue;
+    }
+    if (paint.type === 'IMAGE') {
+      const imageFill = imageFillByIndex.get(paintIndex);
+      if (imageFill) {
+        fills.push(imageFill);
+      }
+      continue;
+    }
+    fills.push(...fillsToElements([paint], node.id, diagnostics));
+  }
+
+  const firstFillIndex = contents.findIndex((element) => element.kind === 'fill');
+  const insertIndex = firstFillIndex >= 0
+    ? firstFillIndex
+    : contents.findIndex((element) => element.kind === 'stroke' || isLayerEffect(element));
+  for (let index = contents.length - 1; index >= 0; index -= 1) {
+    if (contents[index].kind === 'fill') {
+      contents.splice(index, 1);
+    }
+  }
+  contents.splice(insertIndex >= 0 ? insertIndex : contents.length, 0, ...fills);
 }
 
 function encodedImageMimeType(bytes: Uint8Array): string | undefined {
@@ -656,7 +693,12 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
       });
     }
     if ('fills' in node) {
-      contents.push(...fillsToElements(node.fills, node.id, ctx.diagnostics));
+      replaceFillElements(
+        contents,
+        node,
+        await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx),
+        ctx.diagnostics,
+      );
     }
     if ('strokes' in node && 'strokeWeight' in node) {
       contents.push(...strokesToElements(node.strokes, node, node.id, ctx.diagnostics));
@@ -664,7 +706,6 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
     if ('effects' in node) {
       contents.push(...effectsForNode(node, ctx));
     }
-    contents.push(...await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx));
 
     const children: PagxLayer[] = [];
     if ('children' in node) {
@@ -709,16 +750,12 @@ async function mapNode(node: SceneNode, parent: SceneNode | null, ctx: ExportCon
 
   if (isGeometryNode(node)) {
     let contents = shapeContents(node, ctx);
-    const imageElements = await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx);
-    for (const element of imageElements) {
-      const fillIndex = contents.findIndex((item) => item.kind === 'fill');
-      if (fillIndex >= 0 && contents[fillIndex].kind === 'fill') {
-        contents[fillIndex] = element;
-      } else {
-        contents.push(...imageElements);
-        break;
-      }
-    }
+    replaceFillElements(
+      contents,
+      node,
+      await imageFillElements(node as SceneNode & MinimalFillsMixin & ExportMixin, ctx),
+      ctx.diagnostics,
+    );
 
     if (needsMotionTransformGroup(node)) {
       const layerEffects = contents.filter(isLayerEffect);

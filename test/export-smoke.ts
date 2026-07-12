@@ -671,6 +671,52 @@ async function testSiblingMaskExportsMaskReference(): Promise<void> {
   assert(exportedXml.includes('maskType="contour"'), 'vector mask should export as contour mask');
 }
 
+async function testImageAndSolidFillsKeepOriginalOrder(): Promise<void> {
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  (globalThis as unknown as { figma: Record<string, unknown> }).figma = {
+    mixed: Symbol('mixed'),
+    getImageByHash: () => ({ getBytesAsync: async () => pngBytes }),
+    base64Encode: () => 'iVBORw0KGgo=',
+  };
+  const root = {
+    id: '54:6',
+    name: 'IMG_18581',
+    type: 'RECTANGLE',
+    visible: true,
+    opacity: 1,
+    blendMode: 'PASS_THROUGH',
+    width: 520,
+    height: 1156,
+    x: 0,
+    y: 0,
+    absoluteTransform: [[1, 0, 0], [0, 1, 0]],
+    absoluteBoundingBox: { x: 0, y: 0, width: 520, height: 1156 },
+    fills: [
+      { type: 'IMAGE', visible: true, opacity: 1, blendMode: 'NORMAL', imageHash: 'image', scaleMode: 'FILL' },
+      {
+        type: 'SOLID',
+        visible: true,
+        opacity: 0.2,
+        blendMode: 'LINEAR_DODGE',
+        color: { r: 0.09592108428478241, g: 0.16260024905204773, b: 0.896071195602417 },
+      },
+    ],
+    strokes: [],
+    effects: [],
+    animations: {},
+    animationStyles: [],
+    timelines: [],
+    exportAsync: async () => pngBytes,
+  } as unknown as RectangleNode;
+
+  const xml = writePagxXml(await mapFigmaToPagx(root, createExportContext(root)));
+  const imageFillIndex = xml.indexOf('<ImagePattern');
+  const solidFillIndex = xml.indexOf('blendMode="colorDodge"');
+  assert((xml.match(/<Fill/g) ?? []).length === 2, 'image and solid fills should both be exported');
+  assert(imageFillIndex >= 0 && solidFillIndex > imageFillIndex, 'fills should keep their Figma order');
+  assert(/color="#[0-9A-Fa-f]{6}33"/.test(xml), 'solid fill opacity should be preserved');
+}
+
 Promise.all([
   testMotionDataIsExported(),
   testNoMotionDataSkipsAnimations(),
@@ -681,6 +727,7 @@ Promise.all([
   testStaticExportKeepsRotatedLayerMatrix(),
   testHorizontalFlippedRootUsesVisualChildPosition(),
   testSiblingMaskExportsMaskReference(),
+  testImageAndSolidFillsKeepOriginalOrder(),
 ]).then(() => {
   console.log('export smoke tests passed');
 });
