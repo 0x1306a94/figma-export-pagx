@@ -26,7 +26,7 @@ export function parseSvgPath(data: string): ParsedPath {
   let index = 0;
   while (index < tokens.length) {
     const token = tokens[index++];
-    if (!/[a-zA-Z]/.test(token)) {
+    if (!/^[a-zA-Z]$/.test(token)) {
       continue;
     }
 
@@ -41,7 +41,7 @@ export function parseSvgPath(data: string): ParsedPath {
     }
 
     const numbers: number[] = [];
-    while (index < tokens.length && !/[a-zA-Z]/.test(tokens[index])) {
+    while (index < tokens.length && !/^[a-zA-Z]$/.test(tokens[index])) {
       numbers.push(Number(tokens[index++]));
     }
 
