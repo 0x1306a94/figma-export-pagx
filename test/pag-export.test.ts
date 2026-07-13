@@ -4,6 +4,7 @@ import {
   ColorRed,
   CompositeOrder,
   FillRule,
+  GradientFillType,
   LayerType,
   OPAQUE,
   defaultTransform2D,
@@ -14,10 +15,13 @@ import { encodePagFile } from '../src/export/pag/encode/encode-file';
 import { TagCode } from '../src/export/pag/encode/tag-code';
 import { writeEffects } from '../src/export/pag/encode/encode-effects';
 import { writeLayerStyles } from '../src/export/pag/encode/encode-layer-styles';
+import { writeShapes } from '../src/export/pag/encode/encode-shapes';
 import { collectPagMotionFrames } from '../src/export/shared/figma-motion';
 import { exportLayerName, parseSolidMarker } from '../src/export/shared/solid-marker';
 import {
   keyframesFromValues,
+  gradientPointsForPag,
+  makeGradientFill,
   mapFigmaBlendMode,
   mapNodeEffects,
   opacityToPag,
@@ -251,6 +255,51 @@ function testEffectAndLayerStyleTags(): void {
     spread: staticProperty(0.2),
   }]);
   assert.equal(firstTagCode(styleStream.release()), TagCode.DropShadowStyleV2);
+}
+
+function testGradientFillEncode(): void {
+  const paint = {
+    type: 'GRADIENT_LINEAR' as const,
+    gradientTransform: [[1, 0, 0], [0, 1, 0]] as Transform,
+    gradientStops: [{
+      position: 0,
+      color: { r: 1, g: 0, b: 0, a: 0.5 },
+    }, {
+      position: 1,
+      color: { r: 0, g: 0, b: 1, a: 1 },
+    }],
+    opacity: 0.8,
+    visible: true,
+    blendMode: 'NORMAL' as const,
+  };
+
+  assert.deepEqual(
+    gradientPointsForPag(paint, 100, 80),
+    { startPoint: { x: 0, y: 40 }, endPoint: { x: 100, y: 40 } },
+  );
+
+  const fill = makeGradientFill(paint, 100, 80);
+  assert.equal(fill.fillType, GradientFillType.Linear);
+  assert.deepEqual(fill.colors, staticProperty({
+    alphaStops: [
+      { position: 0, midpoint: 0.5, opacity: 128 },
+      { position: 1, midpoint: 0.5, opacity: 255 },
+    ],
+    colorStops: [
+      { position: 0, midpoint: 0.5, color: { red: 255, green: 0, blue: 0 } },
+      { position: 1, midpoint: 0.5, color: { red: 0, green: 0, blue: 255 } },
+    ],
+  }));
+  assert.deepEqual(fill.opacity, staticProperty(204));
+
+  const stream = new EncodeStream();
+  writeShapes(stream, [fill]);
+  assert.equal(firstTagCode(stream.release()), TagCode.GradientFill);
+
+  const radial = makeGradientFill({ ...paint, type: 'GRADIENT_RADIAL' }, 100, 80);
+  const angular = makeGradientFill({ ...paint, type: 'GRADIENT_ANGULAR' }, 100, 80);
+  assert.equal(radial.fillType, GradientFillType.Radial);
+  assert.equal(angular.fillType, GradientFillType.Angle);
 }
 
 function testKeyframes(): void {
@@ -662,6 +711,7 @@ testMinimalShapePag();
 testOpacityAndPath();
 testMapNodeEffects();
 testEffectAndLayerStyleTags();
+testGradientFillEncode();
 testKeyframes();
 testMaskAndMotionPag();
 testSizeAnimationUsesShapeSizeNotCenterScale();

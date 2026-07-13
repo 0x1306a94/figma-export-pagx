@@ -1,6 +1,13 @@
 /** Data type writers aligned with libpag DataTypes.cpp */
 
-import { PathVerb, PagColor, PagPathData, PagPoint, SPATIAL_PRECISION } from '../types';
+import {
+  PathVerb,
+  PagColor,
+  PagGradientColor,
+  PagPathData,
+  PagPoint,
+  SPATIAL_PRECISION,
+} from '../types';
 import { EncodeStream } from './encode-stream';
 
 enum PathRecord {
@@ -22,6 +29,28 @@ export function writeColor(stream: EncodeStream, color: PagColor): void {
   stream.writeUint8(color.red);
   stream.writeUint8(color.green);
   stream.writeUint8(color.blue);
+}
+
+const GRADIENT_PRECISION = 0.00002;
+
+function writeGradientPosition(stream: EncodeStream, value: number): void {
+  const normalized = Math.max(0, Math.min(1, value));
+  stream.writeUint16(Math.trunc(normalized / GRADIENT_PRECISION));
+}
+
+export function writeGradientColor(stream: EncodeStream, gradient: PagGradientColor): void {
+  stream.writeEncodedUint32(gradient.alphaStops.length);
+  stream.writeEncodedUint32(gradient.colorStops.length);
+  for (const stop of gradient.alphaStops) {
+    writeGradientPosition(stream, stop.position);
+    writeGradientPosition(stream, stop.midpoint);
+    stream.writeUint8(stop.opacity);
+  }
+  for (const stop of gradient.colorStops) {
+    writeGradientPosition(stream, stop.position);
+    writeGradientPosition(stream, stop.midpoint);
+    writeColor(stream, stop.color);
+  }
 }
 
 export function writePoint(stream: EncodeStream, point: PagPoint): void {

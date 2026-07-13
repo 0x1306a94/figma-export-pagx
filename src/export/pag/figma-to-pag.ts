@@ -34,7 +34,10 @@ import {
   BlendMode,
   ColorBlack,
   ColorWhite,
+  CompositeOrder,
   DEFAULT_RATIO,
+  FillRule,
+  GradientFillType,
   KeyframeInterpolationType,
   LayerType,
   MaskMode,
@@ -42,6 +45,7 @@ import {
   PagBlurDimensions,
   PagEffect,
   PagFile,
+  PagGradientColor,
   PagImageBytes,
   PagKeyframe,
   PagLayer,
@@ -127,6 +131,101 @@ function allocMaskId(ctx: PagExportContext): number {
 
 function opacityToPag(opacity: number): number {
   return Math.round(Math.max(0, Math.min(1, opacity)) * 255);
+}
+
+type PagGradientPaint = GradientPaint & {
+  type: 'GRADIENT_LINEAR' | 'GRADIENT_RADIAL' | 'GRADIENT_ANGULAR';
+};
+
+function isPagGradientPaint(paint: Paint): paint is PagGradientPaint {
+  return paint.type === 'GRADIENT_LINEAR'
+    || paint.type === 'GRADIENT_RADIAL'
+    || paint.type === 'GRADIENT_ANGULAR';
+}
+
+function invertGradientTransform(transform: Transform): Transform | null {
+  const [[a, c, tx], [b, d, ty]] = transform;
+  const determinant = a * d - b * c;
+  if (Math.abs(determinant) < 1e-8) {
+    return null;
+  }
+  return [
+    [d / determinant, -c / determinant, (c * ty - d * tx) / determinant],
+    [-b / determinant, a / determinant, (b * tx - a * ty) / determinant],
+  ];
+}
+
+function mapGradientPoint(transform: Transform, point: PagPoint, width: number, height: number): PagPoint {
+  return {
+    x: (transform[0][0] * point.x + transform[0][1] * point.y + transform[0][2]) * width,
+    y: (transform[1][0] * point.x + transform[1][1] * point.y + transform[1][2]) * height,
+  };
+}
+
+export function gradientPointsForPag(
+  paint: GradientPaint,
+  width: number,
+  height: number,
+): { startPoint: PagPoint; endPoint: PagPoint } {
+  const inverse = invertGradientTransform(paint.gradientTransform);
+  if (!inverse) {
+    return {
+      startPoint: { x: 0, y: height / 2 },
+      endPoint: { x: width, y: height / 2 },
+    };
+  }
+  return {
+    startPoint: mapGradientPoint(inverse, { x: 0, y: 0.5 }, width, height),
+    endPoint: mapGradientPoint(inverse, { x: 1, y: 0.5 }, width, height),
+  };
+}
+
+function gradientColorForPag(paint: GradientPaint): PagGradientColor {
+  return {
+    alphaStops: paint.gradientStops.map((stop) => ({
+      position: stop.position,
+      midpoint: 0.5,
+      opacity: opacityToPag(stop.color.a),
+    })),
+    colorStops: paint.gradientStops.map((stop) => ({
+      position: stop.position,
+      midpoint: 0.5,
+      color: {
+        red: opacityToPag(stop.color.r),
+        green: opacityToPag(stop.color.g),
+        blue: opacityToPag(stop.color.b),
+      },
+    })),
+  };
+}
+
+function gradientFillTypeForPag(paint: PagGradientPaint): GradientFillType {
+  if (paint.type === 'GRADIENT_RADIAL') {
+    return GradientFillType.Radial;
+  }
+  if (paint.type === 'GRADIENT_ANGULAR') {
+    return GradientFillType.Angle;
+  }
+  return GradientFillType.Linear;
+}
+
+export function makeGradientFill(
+  paint: PagGradientPaint,
+  width: number,
+  height: number,
+): Extract<PagShapeElement, { kind: 'gradientFill' }> {
+  const points = gradientPointsForPag(paint, width, height);
+  return {
+    kind: 'gradientFill',
+    blendMode: BlendMode.Normal,
+    composite: CompositeOrder.BelowPreviousInSameGroup,
+    fillRule: FillRule.NonZeroWinding,
+    fillType: gradientFillTypeForPag(paint),
+    startPoint: staticProperty(points.startPoint),
+    endPoint: staticProperty(points.endPoint),
+    colors: staticProperty(gradientColorForPag(paint)),
+    opacity: staticProperty(opacityToPag(paint.opacity ?? 1)),
+  };
 }
 
 function normalizedDegrees(value: number): number {
@@ -430,7 +529,10 @@ export function mapFigmaBlendMode(mode: SolidPaint['blendMode'], nodeName: strin
   }
 }
 
-function blendModeFromPaint(paint: SolidPaint | ImagePaint, node: SceneNode): BlendMode {
+function blendModeFromPaint(
+  paint: SolidPaint | ImagePaint | PagGradientPaint,
+  node: SceneNode,
+): BlendMode {
   return mapFigmaBlendMode(paint.blendMode ?? 'NORMAL', node.name);
 }
 
@@ -722,7 +824,13 @@ function shapeContentsFromNode(
       const solid = solidFromPaint(paint);
       if (solid) {
         contents.push(makeSolidFill(solid.color, solid.opacity));
-      } else if (paint.type !== 'IMAGE' && paint.visible !== false) {
+      } else if (isPagGradientPaint(paint) && paint.visible !== false) {
+        contents.push(makeGradientFill(paint, size.width, size.height));
+      } else if (
+        paint.type !== 'IMAGE'
+        && paint.type !== 'SHADER'
+        && paint.visible !== false
+      ) {
         addDiagnostic(
           ctx.diagnostics,
           'warning',
@@ -1184,10 +1292,13 @@ async function mapImagePaintLayer(
 function mapShapePaintLayer(
   node: SceneNode,
   ctx: PagExportContext,
-  paint: SolidPaint,
+  paint: SolidPaint | PagGradientPaint,
 ): PagLayer {
   const size = resolvedSize(node);
-  const solid = solidFromPaint(paint)!;
+  const solid = solidFromPaint(paint);
+  const fill = solid
+    ? makeSolidFill(solid.color, solid.opacity)
+    : makeGradientFill(paint as PagGradientPaint, size.width, size.height);
   return {
     id: allocLayerId(ctx),
     name: exportLayerName(node.name),
@@ -1209,9 +1320,13 @@ function mapShapePaintLayer(
     type: LayerType.Shape,
     contents: [
       ...shapeContentsFromNode(node, ctx).filter(
-        (element) => element.kind !== 'fill' && element.kind !== 'stroke',
+        (element) => (
+          element.kind !== 'fill'
+          && element.kind !== 'gradientFill'
+          && element.kind !== 'stroke'
+        ),
       ),
-      makeSolidFill(solid.color, solid.opacity),
+      fill,
     ],
   };
 }
@@ -1230,7 +1345,9 @@ async function mapGeometryLayers(
     ? node.fills.filter((paint) => paint.visible !== false)
     : [];
   const supportedFills = fills.filter(
-    (paint): paint is SolidPaint | ImagePaint => paint.type === 'SOLID' || paint.type === 'IMAGE',
+    (paint): paint is SolidPaint | ImagePaint | PagGradientPaint => (
+      paint.type === 'SOLID' || paint.type === 'IMAGE' || isPagGradientPaint(paint)
+    ),
   );
   if (supportedFills.length > 1) {
     const size = resolvedSize(node);
@@ -1243,7 +1360,7 @@ async function mapGeometryLayers(
       }
 
       ctx.nodeCount += 1;
-      if (canMapFillToSolidLayer(node)) {
+      if (paint.type === 'SOLID' && canMapFillToSolidLayer(node)) {
         layers.push(mapSolidPaintLayer(node, ctx, paint));
         continue;
       }

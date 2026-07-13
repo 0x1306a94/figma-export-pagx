@@ -80,6 +80,23 @@ export enum FillRule {
   EvenOdd = 1,
 }
 
+export enum GradientFillType {
+  Linear = 0,
+  Radial = 1,
+  Angle = 2,
+  Reflected = 3,
+}
+
+export type PagGradientStop = {
+  position: number;
+  midpoint: number;
+};
+
+export type PagGradientColor = {
+  alphaStops: Array<PagGradientStop & { opacity: PagOpacity }>;
+  colorStops: Array<PagGradientStop & { color: PagColor }>;
+};
+
 export enum LineCap {
   Butt = 0,
   Round = 1,
@@ -199,6 +216,17 @@ export type PagShapeElement =
       composite: CompositeOrder;
       fillRule: FillRule;
       color: PagProperty<PagColor>;
+      opacity: PagProperty<PagOpacity>;
+    }
+  | {
+      kind: 'gradientFill';
+      blendMode: BlendMode;
+      composite: CompositeOrder;
+      fillRule: FillRule;
+      fillType: GradientFillType;
+      startPoint: PagProperty<PagPoint>;
+      endPoint: PagProperty<PagPoint>;
+      colors: PagProperty<PagGradientColor>;
       opacity: PagProperty<PagOpacity>;
     }
   | {

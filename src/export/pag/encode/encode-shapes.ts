@@ -6,6 +6,7 @@ import {
   ColorWhite,
   CompositeOrder,
   FillRule,
+  GradientFillType,
   LineCap,
   LineJoin,
   OPAQUE,
@@ -18,6 +19,7 @@ import {
   boolBitConfig,
   colorConfig,
   floatConfig,
+  gradientColorConfig,
   opacityConfig,
   pathConfig,
   pointConfig,
@@ -72,6 +74,25 @@ function writeFill(stream: EncodeStream, shape: Extract<PagShapeElement, { kind:
   });
 }
 
+function writeGradientFill(
+  stream: EncodeStream,
+  shape: Extract<PagShapeElement, { kind: 'gradientFill' }>,
+): void {
+  writeTagBlock(stream, {
+    tagCode: TagCode.GradientFill,
+    configs: [
+      uint8Config(AttributeType.Value, BlendMode.Normal, () => shape.blendMode),
+      uint8Config(AttributeType.Value, CompositeOrder.BelowPreviousInSameGroup, () => shape.composite),
+      uint8Config(AttributeType.Value, FillRule.NonZeroWinding, () => shape.fillRule),
+      uint8Config(AttributeType.Value, GradientFillType.Linear, () => shape.fillType),
+      pointConfig(AttributeType.SpatialProperty, PointZero, () => shape.startPoint),
+      pointConfig(AttributeType.SpatialProperty, { x: 100, y: 0 }, () => shape.endPoint),
+      gradientColorConfig(() => shape.colors),
+      opacityConfig(AttributeType.SimpleProperty, () => shape.opacity),
+    ],
+  });
+}
+
 function writeStroke(stream: EncodeStream, shape: Extract<PagShapeElement, { kind: 'stroke' }>): void {
   writeTagBlock(stream, {
     tagCode: TagCode.Stroke,
@@ -109,6 +130,9 @@ export function writeShapes(stream: EncodeStream, contents: PagShapeElement[]): 
         break;
       case 'fill':
         writeFill(stream, shape);
+        break;
+      case 'gradientFill':
+        writeGradientFill(stream, shape);
         break;
       case 'stroke':
         writeStroke(stream, shape);

@@ -5,6 +5,7 @@ import {
   KeyframeInterpolationType,
   OPAQUE,
   PagColor,
+  PagGradientColor,
   PagKeyframe,
   PagPathData,
   PagPoint,
@@ -19,6 +20,7 @@ import { EncodeStream } from './encode-stream';
 import { TagCode, writeTagHeader } from './tag-code';
 import {
   writeColor,
+  writeGradientColor,
   writePath,
   writePoint,
   writeTime,
@@ -305,6 +307,15 @@ export function pathConfig(
     equals: (a, b) => pathsEqual(a as PagPathData, b as PagPathData),
     get,
     writeValue: (stream, value) => writePath(stream, value as PagPathData),
+  };
+}
+
+export function gradientColorConfig(get: () => unknown): AttributeConfig {
+  return {
+    attributeType: AttributeType.SimpleProperty,
+    defaultValue: { alphaStops: [], colorStops: [] },
+    get,
+    writeValue: (stream, value) => writeGradientColor(stream, value as PagGradientColor),
   };
 }
 
